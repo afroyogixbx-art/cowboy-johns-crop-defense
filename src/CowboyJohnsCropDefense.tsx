@@ -31,7 +31,7 @@ interface TStats {
 }
 interface Tower {
   id: number; kind: TowerId; x: number; y: number; a: number; b: number; tgt: TargetMode;
-  cd: number; charges: number; spent: number; lastAng: number;
+  cd: number; charges: number; spent: number; lastAng: number; anim?: number;
 }
 interface Enemy {
   id: number; kind: EnemyId; dist: number; hp: number; max: number; r: number; slow: number; slowT: number;
@@ -45,13 +45,14 @@ interface Shot {
 }
 interface Plane { id: number; x: number; y: number; vx: number; vy: number; drops: number; gap: number; t: number; dmg: number; splash: number; pierce: number; camoOk: boolean; pathDust: boolean; ang: number }
 interface FloatT { id: number; x: number; y: number; text: string; c: string; t: number; max: number }
-interface Fx { id: number; x: number; y: number; t: number; max: number; kind: "puff" | "flash" | "ring" | "slash" | "spark"; c: string; r: number; ang?: number }
+interface Fx { id: number; x: number; y: number; t: number; max: number; kind: "puff" | "flash" | "ring" | "slash" | "spark" | "splat" | "spray" | "bug"; c: string; r: number; ang?: number }
 interface SpawnG { kind: EnemyId; n: number; gap: number; delay: number }
-interface JohnMsg { text: string; t: number; modal: boolean; who?: Speaker; beat?: "intro" | "joeHello" | "reveal" }
+interface JohnMsg { text: string; t: number; modal: boolean; who?: Speaker; beat?: "intro" | "joeHello" | "reveal" | "johnReact" }
+interface Cutscene { kind: "betrayal"; t: number; phase: 0 | 1 | 2 }
 interface SaveData {
   v: 1; mapId: string; wave: number; cash: number; lives: number; maxLives: number; won40: boolean;
   towers: { kind: TowerId; x: number; y: number; a: number; b: number; tgt: TargetMode; charges: number; spent: number }[];
-  seen: EnemyId[]; revealed?: boolean;
+  seen: EnemyId[]; revealed?: boolean; freeUsed?: boolean;
 }
 interface Sim {
   screen: Screen; mapId: string; wave: number; waving: boolean; cash: number; lives: number; maxLives: number;
@@ -60,9 +61,10 @@ interface Sim {
   hover: Pt | null; john: JohnMsg | null; intro: boolean; won40: boolean; time: number; uid: number;
   seen: EnemyId[]; dirty: boolean; over: boolean; pendingEnd: number; shake: number;
   revealed: boolean; joeHere: boolean; johnHere: boolean;
+  freeUsed: boolean; cut: Cutscene | null;
 }
 
-const WW = 1000, WH = 800, PATH_W = 44, START_CASH = 650, START_LIVES = 100, SELL = 0.7, MAX_WAVE = 40, SAVE_KEY = "cjcd-save-v1", CODE_PFX = "CJ1.";
+const WW = 1000, WH = 800, PATH_W = 44, START_CASH = 0, START_LIVES = 100, SELL = 0.7, MAX_WAVE = 40, SAVE_KEY = "cjcd-save-v1", CODE_PFX = "CJ1.";
 const TARGETS: TargetMode[] = ["first", "last", "close", "strong"];
 const MAP_ID = "johns-south-field";
 
@@ -79,9 +81,11 @@ const JOE_SPOT: Pt = { x: 108, y: 198 };
 const JOHN_SPOT: Pt = { x: 655, y: 195 };
 const JOE_LINE = "A cup of Joe never hurt anything, right?";
 const BARN = { x: 720, y: 18, w: 210, h: 150 };
+const POND = { x: 78, y: 418, r: 64 };
 const NOBUILD: { x: number; y: number; r?: number; w?: number; h?: number }[] = [
   { x: BARN.x, y: BARN.y, w: BARN.w, h: BARN.h },
   { x: PLANT.x, y: PLANT.y, r: 62 },
+  { x: POND.x, y: POND.y, r: POND.r },
 ];
 
 const TOWERS: TowerDef[] = [
@@ -144,7 +148,7 @@ const EDEFS: Record<EnemyId, EnemyDef> = {
 };
 const EIDS = Object.keys(EDEFS) as EnemyId[];
 
-const JOHN_INTRO = "Howdy, farmhand. Name's Cowboy John, and this here's my hemp farm. Them spider mites been eatin' us out of house and home. Plant defenses along this dirt path and keep my crop standin'. A Ladybug Nest is a fine first hire — they love a mite supper. Hold the line, partner.";
+const JOHN_INTRO = "Howdy, farmhand. Name's Cowboy John, and this here's my hemp farm. Them spider mites been eatin' us out of house and home. I'll stake you one Ladybug Nest on the house — it's marked FREE in the shop. Plant it beside the dirt path. After that, cash comes from squashed pests and cleared waves. Hold the line, partner.";
 const JOHN_TIPS = [
   "Towers sit beside the path, not on it — except Sticky Traps, which belong right in the dirt.",
   "Each tower has two upgrade paths. You can take one path all the way and the other up to tier 2.",
@@ -310,6 +314,7 @@ function blockedLand(x: number, y: number): boolean {
   if (x < 18 || y < 18 || x > WW - 18 || y > WH - 18) return true;
   if (inBarn(x, y)) return true;
   if (dist(x, y, PLANT.x, PLANT.y) < 62) return true;
+  if (dist(x, y, POND.x, POND.y) < POND.r - 4) return true;
   return false;
 }
 
@@ -372,7 +377,7 @@ function simToSave(s: Sim): SaveData {
   return {
     v: 1, mapId: s.mapId, wave: s.wave, cash: s.cash, lives: s.lives, maxLives: s.maxLives, won40: s.won40,
     towers: s.towers.map((t) => ({ kind: t.kind, x: t.x, y: t.y, a: t.a, b: t.b, tgt: t.tgt, charges: t.charges, spent: t.spent })),
-    seen: s.seen.slice(), revealed: s.revealed,
+    seen: s.seen.slice(), revealed: s.revealed, freeUsed: s.freeUsed,
   };
 }
 function exportCodeFrom(data: SaveData): string {
@@ -426,11 +431,11 @@ function waveGroups(wave: number): SpawnG[] {
   const g: SpawnG[] = [];
   const add = (kind: EnemyId, count: number, gap = 0.5, delay = 0): void => { g.push({ kind, n: n(count), gap, delay }); };
 
-  if (loop === 1) add("mite", 8, 0.55);
-  else if (loop === 2) add("mite", 12, 0.45);
-  else if (loop === 3) { add("mite", 8, 0.45); add("aphid", 6, 0.35, 4); }
-  else if (loop === 4) add("aphid", 14, 0.32);
-  else if (loop === 5) { add("mite", 10, 0.4); add("aphid", 10, 0.3, 3); }
+  if (loop === 1) add("mite", 7, 0.7);
+  else if (loop === 2) add("mite", 10, 0.55);
+  else if (loop === 3) { add("mite", 8, 0.5); add("aphid", 5, 0.4, 5); }
+  else if (loop === 4) add("aphid", 12, 0.38);
+  else if (loop === 5) { add("mite", 9, 0.45); add("aphid", 8, 0.35, 3.5); }
   else if (loop === 6) { add("mite", 8, 0.4); add("beetle", 4, 0.9, 3); }
   else if (loop === 7) { add("beetle", 6, 0.7); add("aphid", 10, 0.3, 2); }
   else if (loop === 8) { add("mite", 10, 0.35); add("gnat", 6, 0.5, 3); add("aphid", 8, 0.3, 5); }
@@ -603,7 +608,7 @@ function investOf(t: Tower): number {
   for (let i = 0; i < t.b; i++) n += def.paths[1][i].cost;
   return n;
 }
-function refundOf(t: Tower): number { return Math.floor(investOf(t) * SELL); }
+function refundOf(t: Tower): number { return Math.floor(t.spent * SELL); }
 function canUpgrade(t: Tower, path: 0 | 1): boolean {
   const cur = path === 0 ? t.a : t.b;
   const other = path === 0 ? t.b : t.a;
@@ -639,412 +644,457 @@ function goldGrad(c: CanvasRenderingContext2D, x: number, y: number, r: number, 
 
 function drawHempLeaf(c: CanvasRenderingContext2D, x: number, y: number, s: number, ang: number, col: string, wilt: number): void {
   c.save(); c.translate(x, y); c.rotate(ang);
-  const droop = wilt * 0.6;
-  c.rotate(droop);
+  const droop = wilt * 0.85;
+  c.rotate(droop * (ang >= 0 ? 1 : -1) * 0.25);
   c.fillStyle = col;
   c.beginPath();
-  c.moveTo(0, 0);
-  // palmate: 5-7 leaflets
   const leaflets = 7;
   for (let i = 0; i < leaflets; i++) {
-    const a = -Math.PI / 2 + (i - (leaflets - 1) / 2) * 0.32;
-    const len = s * (i === 3 ? 1.15 : i === 2 || i === 4 ? 0.95 : i === 1 || i === 5 ? 0.72 : 0.5);
-    const w = s * (i === 3 ? 0.22 : 0.16);
-    const lx = Math.cos(a) * len, ly = Math.sin(a) * len;
+    const a = -Math.PI / 2 + (i - (leaflets - 1) / 2) * (0.34 + wilt * 0.12);
+    const len = s * (i === 3 ? 1.18 : i === 2 || i === 4 ? 0.96 : i === 1 || i === 5 ? 0.7 : 0.48) * (1 - wilt * 0.28);
+    const w = s * (i === 3 ? 0.24 : 0.16);
+    const lx = Math.cos(a) * len, ly = Math.sin(a) * len * (1 + wilt * 0.35);
     const px = Math.cos(a + Math.PI / 2) * w, py = Math.sin(a + Math.PI / 2) * w;
     c.moveTo(0, 0);
-    c.quadraticCurveTo(px * 1.6, py * 1.6, lx, ly);
-    c.quadraticCurveTo(-px * 1.6, -py * 1.6, 0, 0);
+    c.quadraticCurveTo(px * 1.7, py * 1.7, lx, ly);
+    c.quadraticCurveTo(-px * 1.7, -py * 1.7, 0, 0);
   }
   c.fill();
-  c.strokeStyle = "rgba(20,40,16,0.35)"; c.lineWidth = Math.max(0.6, s * 0.04); c.stroke();
+  ink(c, Math.max(1.2, s * 0.07)); c.stroke();
   c.restore();
 }
 
+const INK = "#1a1008";
+const HILL_H = 112;
+function ink(c: CanvasRenderingContext2D, w = 2.4): void {
+  c.strokeStyle = INK; c.lineWidth = w; c.lineJoin = "round"; c.lineCap = "round";
+}
+function fillStroke(c: CanvasRenderingContext2D, fill: string, w = 2.4): void {
+  c.fillStyle = fill; c.fill(); ink(c, w); c.stroke();
+}
+function disc(c: CanvasRenderingContext2D, x: number, y: number, r: number, fill: string, w = 2.2): void {
+  c.beginPath(); c.arc(x, y, r, 0, Math.PI * 2); fillStroke(c, fill, w);
+}
+function oval(c: CanvasRenderingContext2D, x: number, y: number, rx: number, ry: number, fill: string, w = 2.2): void {
+  ellipse(c, x, y, rx, ry); fillStroke(c, fill, w);
+}
+function shadowBlob(c: CanvasRenderingContext2D, x: number, y: number, rx: number, ry: number, a = 0.28): void {
+  c.fillStyle = `rgba(40,24,8,${a})`; ellipse(c, x, y, rx, ry); c.fill();
+}
+function toonEyes(c: CanvasRenderingContext2D, x: number, y: number, s: number, blink = false, lx = 0, ly = 0, mad = false): void {
+  const gap = s * 0.72;
+  for (const side of [-1, 1]) {
+    const ex = x + side * gap, ey = y;
+    if (blink) {
+      ink(c, Math.max(1.6, s * 0.22));
+      c.beginPath(); c.moveTo(ex - s * 0.55, ey); c.quadraticCurveTo(ex, ey + s * 0.12, ex + s * 0.55, ey); c.stroke();
+      continue;
+    }
+    oval(c, ex, ey, s * 0.62, s * 0.72, "#fffdf0", Math.max(1.6, s * 0.18));
+    const px = ex + lx * s * 0.25, py = ey + ly * s * 0.22 + (mad ? s * 0.08 : 0);
+    c.fillStyle = INK; c.beginPath(); c.arc(px, py, s * 0.28, 0, Math.PI * 2); c.fill();
+    c.fillStyle = "#fff"; c.beginPath(); c.arc(px - s * 0.1, py - s * 0.12, s * 0.1, 0, Math.PI * 2); c.fill();
+    if (mad) {
+      ink(c, Math.max(1.8, s * 0.2));
+      c.beginPath();
+      c.moveTo(ex - side * s * 0.7, ey - s * 0.95);
+      c.lineTo(ex + side * s * 0.15, ey - s * 0.3);
+      c.stroke();
+    }
+  }
+}
+function toonMouth(c: CanvasRenderingContext2D, x: number, y: number, w: number, open: number, smile = true): void {
+  ink(c, 2.1);
+  if (open > 0.12) {
+    c.fillStyle = "#4a1020";
+    c.beginPath(); c.ellipse(x, y, w * 0.48, w * 0.18 + open * w * 0.32, 0, 0, Math.PI * 2);
+    c.fill(); c.stroke();
+    if (open > 0.35) {
+      c.fillStyle = "#e07080";
+      c.beginPath(); c.ellipse(x, y + w * 0.14, w * 0.22, w * 0.1, 0, 0, Math.PI * 2); c.fill();
+    }
+  } else {
+    c.beginPath();
+    if (smile) c.arc(x, y - w * 0.02, w * 0.36, 0.2, Math.PI - 0.2);
+    else c.arc(x, y + w * 0.18, w * 0.28, Math.PI + 0.25, -0.25);
+    c.stroke();
+  }
+}
+
 function drawPlant(c: CanvasRenderingContext2D, wilt: number, t: number): void {
-  const x = 0, y = 16;
-  // mound
-  ellipse(c, x, y + 18, 48, 16); c.fillStyle = "#5a3e22"; c.fill();
-  ellipse(c, x, y + 14, 38, 11); c.fillStyle = "#6c4a28"; c.fill();
-  // crate ring
-  c.strokeStyle = "#6a4420"; c.lineWidth = 3;
-  c.beginPath(); c.ellipse(x, y + 16, 44, 14, 0, 0, Math.PI * 2); c.stroke();
-  c.fillStyle = "#4a3018";
-  for (let i = 0; i < 8; i++) {
-    const a = (i / 8) * Math.PI * 2;
-    c.fillRect(x + Math.cos(a) * 40 - 3, y + 16 + Math.sin(a) * 12 - 5, 6, 10);
+  const sway = Math.sin(t * 1.6) * 0.14 * (1 - wilt * 0.45);
+  c.save();
+  shadowBlob(c, 0, 16, 36, 14, 0.32);
+  // top-down tub
+  oval(c, 0, 14, 34, 18, wilt > 0.55 ? "#6a4a28" : "#8a5a2a", 3);
+  oval(c, 0, 10, 28, 14, wilt > 0.55 ? "#3d6a28" : "#2f7a28", 2.2);
+  const col = wilt < 0.25 ? "#3cc84a" : wilt < 0.5 ? "#7cb830" : wilt < 0.75 ? "#c4a030" : "#a06828";
+  c.save();
+  c.rotate(sway);
+  c.translate(0, wilt * 8);
+  for (let i = 0; i < 9; i++) {
+    const a = (i / 9) * Math.PI * 2 + sway * 0.4;
+    const r = 22 + (i % 3) * 7;
+    drawHempLeaf(c, Math.cos(a) * r * 0.35, Math.sin(a) * r * 0.28 - 8, 22 - i, a + Math.PI / 2, col, wilt);
   }
-  const healthCol = wilt < 0.25 ? "#4ea33a" : wilt < 0.5 ? "#7aa332" : wilt < 0.75 ? "#b8a326" : "#b86a28";
-  const leafCol = wilt < 0.25 ? "#3f8a32" : wilt < 0.5 ? "#6a8a28" : wilt < 0.75 ? "#9a8a28" : "#8a5a22";
-  const h = 86 - wilt * 22;
-  // stalks
-  c.strokeStyle = wilt > 0.7 ? "#6a4a22" : "#3a5a20"; c.lineWidth = 4; c.lineCap = "round";
-  c.beginPath(); c.moveTo(x, y + 8); c.quadraticCurveTo(x + wilt * 10, y - h * 0.45, x + wilt * 14, y - h); c.stroke();
-  c.lineWidth = 2.5;
-  c.beginPath(); c.moveTo(x, y + 6); c.quadraticCurveTo(x - 18, y - 30, x - 22 - wilt * 8, y - 58); c.stroke();
-  c.beginPath(); c.moveTo(x, y + 6); c.quadraticCurveTo(x + 18, y - 26, x + 24 + wilt * 8, y - 54); c.stroke();
-  const sway = Math.sin(t * 1.2) * 0.08;
-  drawHempLeaf(c, x + wilt * 14, y - h, 26, sway, leafCol, wilt);
-  drawHempLeaf(c, x - 22 - wilt * 8, y - 58, 18, -0.7 + sway, leafCol, wilt);
-  drawHempLeaf(c, x + 24 + wilt * 8, y - 54, 17, 0.7 + sway, leafCol, wilt);
-  drawHempLeaf(c, x - 6, y - h * 0.55, 14, -0.3, leafCol, wilt);
-  drawHempLeaf(c, x + 8, y - h * 0.62, 13, 0.35, leafCol, wilt);
-  // buds
-  c.fillStyle = healthCol;
-  ellipse(c, x + wilt * 14, y - h + 4, 5, 6); c.fill();
-  ellipse(c, x - 20, y - 54, 4, 5); c.fill();
-  // sign
-  c.fillStyle = "#6a4420"; c.fillRect(x - 36, y + 22, 6, 18);
-  c.fillStyle = "#c4a56a"; rr(c, x - 52, y + 8, 72, 20, 3); c.fill();
-  c.strokeStyle = "#5a3a18"; c.lineWidth = 1.2; c.stroke();
-  c.fillStyle = "#3a2410"; c.font = "bold 9px Georgia, serif"; c.textAlign = "center"; c.textBaseline = "middle";
-  c.fillText("JOHN'S CROP", x - 16, y + 18);
-  if (wilt > 0.02) {
-    c.fillStyle = `rgba(160,80,20,${0.15 + wilt * 0.25})`;
-    ellipse(c, x, y - 30, 40, 50); c.fill();
-  }
-}
-
-function drawFencePost(c: CanvasRenderingContext2D, x: number, y: number, h: number): void {
-  c.fillStyle = "#6a4a28"; c.fillRect(x - 3, y - h, 6, h);
-  c.fillStyle = "#8a6238"; c.fillRect(x - 2, y - h, 2, h);
-  c.fillStyle = "#5a3a18"; c.fillRect(x - 4, y - h - 2, 8, 5);
-}
-
-function drawFenceRow(c: CanvasRenderingContext2D, x1: number, y1: number, x2: number, y2: number, step: number): void {
-  const d = dist(x1, y1, x2, y2), n = Math.max(2, Math.round(d / step));
-  c.strokeStyle = "#6a4a28"; c.lineWidth = 3;
-  c.beginPath(); c.moveTo(x1, y1 - 16); c.lineTo(x2, y2 - 16); c.stroke();
-  c.lineWidth = 2.2; c.beginPath(); c.moveTo(x1, y1 - 8); c.lineTo(x2, y2 - 8); c.stroke();
-  for (let i = 0; i <= n; i++) {
-    const t = i / n;
-    drawFencePost(c, lerp(x1, x2, t), lerp(y1, y2, t), 22);
-  }
-}
-
-function drawBarn(c: CanvasRenderingContext2D): void {
-  const { x, y, w, h } = BARN;
-  // shadow
-  c.fillStyle = "rgba(40,24,10,0.35)";
-  ellipse(c, x + w * 0.55, y + h + 6, w * 0.5, 12); c.fill();
-  // body
-  const g = c.createLinearGradient(x, y, x + w, y);
-  g.addColorStop(0, "#8a2a1c"); g.addColorStop(0.5, "#b33828"); g.addColorStop(1, "#7a2218");
-  c.fillStyle = g; rr(c, x + 10, y + 40, w - 20, h - 40, 2); c.fill();
-  // white trim
-  c.strokeStyle = "#efe6d0"; c.lineWidth = 3; rr(c, x + 10, y + 40, w - 20, h - 40, 2); c.stroke();
-  // loft
-  c.beginPath();
-  c.moveTo(x, y + 44); c.lineTo(x + w / 2, y + 4); c.lineTo(x + w, y + 44); c.closePath();
-  c.fillStyle = "#9a3022"; c.fill(); c.strokeStyle = "#efe6d0"; c.lineWidth = 3; c.stroke();
-  // roof boards
-  c.strokeStyle = "#5a1810"; c.lineWidth = 1;
-  for (let i = 1; i < 6; i++) { const yy = y + 8 + i * 6; c.beginPath(); c.moveTo(x + 16 + i * 6, yy); c.lineTo(x + w - 16 - i * 6, yy); c.stroke(); }
-  // door
-  c.fillStyle = "#4a2410"; rr(c, x + w * 0.38, y + h - 58, 48, 54, 2); c.fill();
-  c.strokeStyle = "#efe6d0"; c.lineWidth = 2; c.stroke();
-  c.beginPath(); c.moveTo(x + w * 0.38 + 24, y + h - 56); c.lineTo(x + w * 0.38 + 24, y + h - 6); c.stroke();
-  c.fillStyle = "#d2a04a"; ellipse(c, x + w * 0.38 + 16, y + h - 30, 3, 3); c.fill();
-  // loft door
-  c.fillStyle = "#4a2410"; rr(c, x + w / 2 - 12, y + 48, 24, 22, 1); c.fill();
-  c.strokeStyle = "#efe6d0"; c.stroke();
-  // hay peek
-  c.fillStyle = "#d2b04a";
-  c.beginPath(); c.moveTo(x + 18, y + h - 8); c.quadraticCurveTo(x + 28, y + h - 22, x + 44, y + h - 8); c.fill();
-}
-
-function drawCropRow(c: CanvasRenderingContext2D, x: number, y: number, len: number, ang: number, n: number, rng: () => number, wilt = 0): void {
-  for (let i = 0; i < n; i++) {
-    const t = (i + 0.5) / n;
-    const px = x + Math.cos(ang) * len * t + (rng() - 0.5) * 6;
-    const py = y + Math.sin(ang) * len * t + (rng() - 0.5) * 4;
-    const s = 7 + rng() * 4;
-    const col = rng() > 0.5 ? "#3a7a30" : "#4a8a34";
-    drawHempLeaf(c, px, py, s, -Math.PI / 2 + (rng() - 0.5) * 0.4, col, wilt);
-    c.fillStyle = "#3a5a20"; c.fillRect(px - 0.8, py, 1.6, 6);
-  }
-}
-
-function drawWagonWheel(c: CanvasRenderingContext2D, x: number, y: number, r: number): void {
-  c.save(); c.translate(x, y);
-  c.strokeStyle = "#5a3a18"; c.lineWidth = 3; c.beginPath(); c.arc(0, 0, r, 0, Math.PI * 2); c.stroke();
-  c.lineWidth = 2;
-  for (let i = 0; i < 8; i++) { const a = i * Math.PI / 4; c.beginPath(); c.moveTo(0, 0); c.lineTo(Math.cos(a) * r, Math.sin(a) * r); c.stroke(); }
-  c.fillStyle = "#6a4a22"; c.beginPath(); c.arc(0, 0, r * 0.22, 0, Math.PI * 2); c.fill();
+  drawHempLeaf(c, 0, -10, 28, sway, col, wilt);
+  // bud face
+  disc(c, 0, -4, 9, wilt > 0.6 ? "#c8b060" : "#7ae05a", 2);
+  const blink = ((t * 0.7) % 4.2) > 4.0;
+  toonEyes(c, 0, -6, 3.1, blink || wilt > 0.8, 0, wilt * 0.8, false);
+  toonMouth(c, 0, -1.2, 5, wilt > 0.7 ? 0 : 0.05, wilt < 0.5);
+  c.restore();
   c.restore();
 }
 
 function drawPathDirt(c: CanvasRenderingContext2D): void {
-  // wide dirt stroke along LUT
   c.lineJoin = "round"; c.lineCap = "round";
-  const edge = PATH_W * 0.62;
-  c.strokeStyle = "#6b4a28"; c.lineWidth = PATH_W + 10;
-  c.beginPath();
-  c.moveTo(LUT[0].x, LUT[0].y);
-  for (const p of LUT) c.lineTo(p.x, p.y);
-  c.stroke();
-  c.strokeStyle = "#8a6238"; c.lineWidth = PATH_W;
-  c.beginPath(); c.moveTo(LUT[0].x, LUT[0].y);
-  for (const p of LUT) c.lineTo(p.x, p.y);
-  c.stroke();
-  // ruts
-  c.strokeStyle = "rgba(70,42,20,0.45)"; c.lineWidth = 5;
-  c.beginPath(); c.moveTo(LUT[0].x, LUT[0].y + 6);
-  for (const p of LUT) c.lineTo(p.x + Math.cos(p.ang + Math.PI / 2) * 6, p.y + Math.sin(p.ang + Math.PI / 2) * 6);
-  c.stroke();
-  c.beginPath(); c.moveTo(LUT[0].x, LUT[0].y - 6);
-  for (const p of LUT) c.lineTo(p.x + Math.cos(p.ang - Math.PI / 2) * 6, p.y + Math.sin(p.ang - Math.PI / 2) * 6);
-  c.stroke();
-  // lighter center dust
-  c.strokeStyle = "rgba(196,154,90,0.28)"; c.lineWidth = PATH_W * 0.35;
-  c.beginPath(); c.moveTo(LUT[0].x, LUT[0].y);
-  for (const p of LUT) c.lineTo(p.x, p.y);
-  c.stroke();
-  void edge;
+  const stroke = (w: number, col: string): void => {
+    c.strokeStyle = col; c.lineWidth = w;
+    c.beginPath();
+    c.moveTo(PATH_RAW[0].x, PATH_RAW[0].y);
+    for (let i = 1; i < PATH_RAW.length; i++) c.lineTo(PATH_RAW[i].x, PATH_RAW[i].y);
+    c.stroke();
+  };
+  stroke(PATH_W + 14, INK);
+  stroke(PATH_W + 8, "#6a3e14");
+  stroke(PATH_W, "#d4a054");
+  stroke(PATH_W - 10, "#e8b86a");
+  const rng = mulberry(77);
+  for (let i = 0; i < 90; i++) {
+    const d = rng() * PLEN;
+    const p = posAt(d);
+    const ox = (rng() - 0.5) * PATH_W * 0.55, oy = (rng() - 0.5) * PATH_W * 0.4;
+    c.fillStyle = rng() > 0.5 ? "#c4843c" : "#f0c878";
+    c.beginPath(); c.ellipse(p.x + ox, p.y + oy, 2 + rng() * 3, 1.2 + rng() * 2, rng() * 4, 0, Math.PI * 2); c.fill();
+  }
 }
 
-function drawGate(c: CanvasRenderingContext2D): void {
-  const p = LUT[8] ?? LUT[0];
-  const ang = p.ang;
-  const x = 18, y = 250;
-  c.save(); c.translate(x, y); c.rotate(ang);
-  // posts
-  c.fillStyle = "#5a3a18"; c.fillRect(-8, -36, 8, 50); c.fillRect(22, -36, 8, 50);
-  c.fillStyle = "#c4a56a"; c.fillRect(-12, -42, 16, 8); c.fillRect(18, -42, 16, 8);
-  // open gate doors
-  c.fillStyle = "#7a5228";
-  c.save(); c.translate(-8, -8); c.rotate(-0.9); c.fillRect(-2, -4, 6, 28); c.restore();
-  c.save(); c.translate(30, -8); c.rotate(0.9); c.fillRect(-4, -4, 6, 28); c.restore();
-  // sign
-  c.fillStyle = "#c4a56a"; rr(c, -16, -58, 58, 16, 2); c.fill();
-  c.fillStyle = "#3a2410"; c.font = "bold 8px Georgia, serif"; c.textAlign = "center"; c.textBaseline = "middle";
-  c.fillText("SOUTH GATE", 13, -50);
+function drawHillside(c: CanvasRenderingContext2D): void {
+  c.beginPath();
+  c.moveTo(0, 0);
+  c.lineTo(WW, 0);
+  c.lineTo(WW, 70);
+  c.quadraticCurveTo(820, 128, 640, 100);
+  c.quadraticCurveTo(480, 78, 300, 118);
+  c.quadraticCurveTo(160, 142, 0, 96);
+  c.closePath();
+  fillStroke(c, "#4aa83c", 3.2);
+  c.beginPath();
+  c.moveTo(0, 0);
+  c.lineTo(WW, 0);
+  c.lineTo(WW, 36);
+  c.quadraticCurveTo(700, 70, 400, 44);
+  c.quadraticCurveTo(180, 28, 0, 52);
+  c.closePath();
+  fillStroke(c, "#6fd24a", 2.4);
+  // ridge tufts
+  const rng = mulberry(19);
+  for (let i = 0; i < 28; i++) {
+    const x = 20 + rng() * (WW - 40), y = 18 + rng() * 70;
+    c.fillStyle = rng() > 0.5 ? "#2e8a28" : "#8ae05a";
+    c.beginPath();
+    c.moveTo(x, y + 6);
+    c.quadraticCurveTo(x + 4, y - 8, x + 8, y + 5);
+    c.quadraticCurveTo(x + 2, y - 2, x, y + 6);
+    c.fill();
+  }
+  // little dirt crease where the swarm will pour over
+  c.beginPath();
+  c.moveTo(80, 86);
+  c.quadraticCurveTo(400, 60, 900, 78);
+  ink(c, 2.2); c.strokeStyle = "#5a3810"; c.stroke();
+}
+
+function drawBarnRoof(c: CanvasRenderingContext2D): void {
+  const { x, y, w, h } = BARN;
+  shadowBlob(c, x + w * 0.5, y + h * 0.7, w * 0.48, 16, 0.25);
+  // top-down barn: rectangle with peaked ridge and south doors
+  c.beginPath(); rr(c, x + 6, y + 10, w - 12, h - 16, 8);
+  fillStroke(c, "#c43c2c", 3.2);
+  // ridge
+  c.beginPath(); c.moveTo(x + 10, y + 18); c.lineTo(x + w - 10, y + 18);
+  ink(c, 4); c.strokeStyle = "#8a2018"; c.stroke();
+  // roof boards
+  ink(c, 1.6); c.strokeStyle = "#8a2018";
+  for (let i = 1; i < 6; i++) {
+    const yy = y + 22 + i * ((h - 36) / 6);
+    c.beginPath(); c.moveTo(x + 14, yy); c.lineTo(x + w - 14, yy); c.stroke();
+  }
+  // south door
+  c.beginPath(); rr(c, x + w * 0.38, y + h - 38, w * 0.24, 26, 4);
+  fillStroke(c, "#6a3a18", 2.2);
+  disc(c, x + w * 0.58, y + h - 24, 2.4, "#e8c050", 1);
+  // weather vane
+  disc(c, x + w * 0.5, y + 12, 4, "#e8c050", 2);
+  c.beginPath(); c.moveTo(x + w * 0.5, y + 12); c.lineTo(x + w * 0.5, y - 6); ink(c, 2); c.stroke();
+  c.beginPath(); c.moveTo(x + w * 0.5, y - 6); c.lineTo(x + w * 0.5 + 12, y - 2); c.lineTo(x + w * 0.5, y + 2); c.closePath();
+  fillStroke(c, "#f0d060", 1.6);
+}
+
+function drawPondBasin(c: CanvasRenderingContext2D): void {
+  shadowBlob(c, POND.x + 4, POND.y + 8, POND.r + 4, POND.r * 0.72, 0.22);
+  oval(c, POND.x, POND.y, POND.r, POND.r * 0.78, "#1a6a8a", 3);
+  oval(c, POND.x - 6, POND.y - 4, POND.r * 0.72, POND.r * 0.52, "#2ab0c8", 2);
+  oval(c, POND.x - 12, POND.y - 8, POND.r * 0.32, POND.r * 0.2, "#8ae8f0", 0);
+  // lily pads
+  for (const p of [{ x: -18, y: 8 }, { x: 16, y: -6 }, { x: 6, y: 18 }]) {
+    oval(c, POND.x + p.x, POND.y + p.y, 10, 7, "#3cb848", 2);
+    disc(c, POND.x + p.x + 2, POND.y + p.y, 2.2, "#f0d060", 1.2);
+  }
+  // cattails
+  for (const p of [{ x: -48, y: -20 }, { x: 44, y: 16 }, { x: -36, y: 28 }]) {
+    ink(c, 2.2);
+    c.beginPath(); c.moveTo(POND.x + p.x, POND.y + p.y); c.lineTo(POND.x + p.x + 2, POND.y + p.y - 16); c.stroke();
+    oval(c, POND.x + p.x + 2, POND.y + p.y - 20, 3.2, 6, "#8a3a18", 1.6);
+  }
+}
+
+function drawTractor(c: CanvasRenderingContext2D, x: number, y: number): void {
+  shadowBlob(c, x, y + 8, 28, 12, 0.28);
+  c.save(); c.translate(x, y); c.rotate(-0.25);
+  // body top-down
+  c.beginPath(); rr(c, -22, -10, 36, 20, 5); fillStroke(c, "#d43c28", 2.6);
+  c.beginPath(); rr(c, 6, -8, 16, 16, 4); fillStroke(c, "#f0d24a", 2.2);
+  disc(c, -16, 8, 8, "#2a2418", 2.4);
+  disc(c, -16, 8, 3.5, "#c4b090", 1.5);
+  disc(c, 14, 9, 6, "#2a2418", 2.2);
+  disc(c, 14, 9, 2.6, "#c4b090", 1.4);
+  disc(c, 12, -2, 3, "#7ad4f0", 1.6);
   c.restore();
+}
+
+function drawHay(c: CanvasRenderingContext2D, x: number, y: number, rot: number): void {
+  c.save(); c.translate(x, y); c.rotate(rot);
+  shadowBlob(c, 2, 6, 16, 8, 0.25);
+  c.beginPath(); rr(c, -16, -10, 32, 20, 6); fillStroke(c, "#e8c04a", 2.4);
+  ink(c, 1.5); c.strokeStyle = "#b88820";
+  for (let i = -8; i <= 8; i += 5) { c.beginPath(); c.moveTo(-14, i); c.lineTo(14, i); c.stroke(); }
+  c.beginPath(); c.moveTo(0, -10); c.lineTo(0, 10); c.stroke();
+  c.restore();
+}
+
+function drawFenceSeg(c: CanvasRenderingContext2D, x1: number, y1: number, x2: number, y2: number): void {
+  ink(c, 3.2); c.strokeStyle = "#6a3e18";
+  c.beginPath(); c.moveTo(x1, y1); c.lineTo(x2, y2); c.stroke();
+  const n = Math.max(2, Math.round(dist(x1, y1, x2, y2) / 28));
+  for (let i = 0; i <= n; i++) {
+    const u = i / n, x = x1 + (x2 - x1) * u, y = y1 + (y2 - y1) * u;
+    c.beginPath(); rr(c, x - 3, y - 8, 6, 16, 1.5); fillStroke(c, "#8a5a28", 1.8);
+  }
+}
+
+function drawCropTuft(c: CanvasRenderingContext2D, x: number, y: number, phase: number, col: string): void {
+  c.save(); c.translate(x, y);
+  const sway = Math.sin(phase) * 0.35;
+  c.rotate(sway * 0.25);
+  for (let i = -1; i <= 1; i++) {
+    c.beginPath();
+    c.moveTo(i * 3, 5);
+    c.quadraticCurveTo(i * 3 + sway * 6, -6, i * 4 + sway * 8, -14);
+    ink(c, 2); c.strokeStyle = col; c.stroke();
+    // tiny top-down hemp star
+    c.fillStyle = col;
+    c.beginPath();
+    for (let k = 0; k < 5; k++) {
+      const a = -Math.PI / 2 + k * 0.45 + sway * 0.2;
+      const len = 7;
+      c.moveTo(i * 4, -12);
+      c.lineTo(i * 4 + Math.cos(a) * len, -12 + Math.sin(a) * len * 0.7);
+    }
+    c.fill();
+  }
+  c.restore();
+}
+
+function cropAllowed(x: number, y: number): boolean {
+  if (y < HILL_H + 8) return false;
+  if (nearPath(x, y).d < PATH_W * 0.7 + 8) return false;
+  if (inBarn(x, y)) return false;
+  if (dist(x, y, POND.x, POND.y) < POND.r + 18) return false;
+  if (dist(x, y, PLANT.x, PLANT.y) < 70) return false;
+  if (dist(x, y, 250, 155) < 40) return false;
+  return true;
 }
 
 function drawFarmBg(c: CanvasRenderingContext2D): void {
-  // sky
-  const sky = c.createLinearGradient(0, 0, 0, WH);
-  sky.addColorStop(0, "#f0c878");
-  sky.addColorStop(0.18, "#e8b060");
-  sky.addColorStop(0.32, "#c9a060");
-  sky.addColorStop(0.32, "#7a9a48");
-  sky.addColorStop(1, "#5a7a34");
-  c.fillStyle = sky; c.fillRect(0, 0, WW, WH);
-  // distant hills
-  c.fillStyle = "#8a6a3a";
-  c.beginPath(); c.moveTo(0, 200); c.quadraticCurveTo(180, 150, 340, 188); c.quadraticCurveTo(520, 140, 700, 180); c.quadraticCurveTo(860, 150, 1000, 190); c.lineTo(1000, 230); c.lineTo(0, 230); c.fill();
-  c.fillStyle = "#6e8a3e";
-  c.beginPath(); c.moveTo(0, 210); c.quadraticCurveTo(200, 170, 420, 205); c.quadraticCurveTo(700, 160, 1000, 200); c.lineTo(1000, 250); c.lineTo(0, 250); c.fill();
-  // field base
-  const field = c.createLinearGradient(0, 200, 0, WH);
-  field.addColorStop(0, "#8a9a48");
-  field.addColorStop(0.4, "#7a8a3c");
-  field.addColorStop(1, "#6a7a34");
-  c.fillStyle = field; c.fillRect(0, 210, WW, WH - 210);
-  // dry patches
-  const rng = mulberry(1204);
-  for (let i = 0; i < 80; i++) {
-    c.fillStyle = `rgba(150,120,50,${0.05 + rng() * 0.1})`;
-    ellipse(c, rng() * WW, 220 + rng() * 420, 30 + rng() * 60, 10 + rng() * 18); c.fill();
+  c.fillStyle = "#4cb83c";
+  c.fillRect(0, 0, WW, WH);
+  const rng = mulberry(4);
+  for (let i = 0; i < 220; i++) {
+    const x = rng() * WW, y = rng() * WH;
+    c.fillStyle = rng() > 0.5 ? "#3aa32e" : "#6ad24c";
+    c.beginPath(); c.ellipse(x, y, 18 + rng() * 40, 10 + rng() * 22, rng() * 3, 0, Math.PI * 2); c.fill();
   }
-  // crop rows in pockets
-  drawCropRow(c, 80, 80, 280, 0.05, 14, rng);
-  drawCropRow(c, 80, 110, 260, 0.04, 13, rng);
-  drawCropRow(c, 90, 140, 240, 0.03, 12, rng);
-  drawCropRow(c, 200, 270, 280, 0.02, 12, rng);
-  drawCropRow(c, 200, 300, 280, 0.0, 12, rng);
-  drawCropRow(c, 200, 330, 260, -0.02, 11, rng);
-  drawCropRow(c, 200, 360, 230, -0.04, 10, rng);
-  drawCropRow(c, 300, 500, 280, 0.02, 12, rng);
-  drawCropRow(c, 280, 80, 200, 0.1, 10, rng);
-  drawCropRow(c, 640, 200, 140, 0.8, 8, rng);
-  drawCropRow(c, 880, 420, 80, 1.2, 5, rng);
-  drawCropRow(c, 40, 500, 80, 0.3, 5, rng);
-  drawCropRow(c, 300, 650, 260, 0.02, 11, rng);
-  drawCropRow(c, 300, 680, 240, 0.0, 10, rng);
-  drawCropRow(c, 720, 300, 120, 0.9, 7, rng);
-  // dirt path
+  drawHillside(c);
+  // field patches
+  for (let i = 0; i < 16; i++) {
+    const x = 40 + rng() * 900, y = 160 + rng() * 580;
+    if (!cropAllowed(x, y)) continue;
+    c.fillStyle = i % 2 ? "#8a5a28" : "#6a4020";
+    c.globalAlpha = 0.18;
+    c.beginPath(); c.ellipse(x, y, 50, 18, rng() * 2, 0, Math.PI * 2); c.fill();
+    c.globalAlpha = 1;
+  }
   drawPathDirt(c);
-  // pebbles on path
-  const rng2 = mulberry(99);
-  for (let i = 0; i < LUT.length; i += 14) {
-    const p = LUT[i];
-    const o = (rng2() - 0.5) * 22;
-    c.fillStyle = rng2() > 0.5 ? "#6a4e2e" : "#8a6a40";
-    ellipse(c, p.x + Math.cos(p.ang + Math.PI / 2) * o, p.y + Math.sin(p.ang + Math.PI / 2) * o, 2 + rng2() * 3, 1.4 + rng2()); c.fill();
-  }
-  // grass tufts along path edge
-  c.strokeStyle = "#3a6a28"; c.lineWidth = 1.2;
-  for (let i = 0; i < LUT.length; i += 18) {
-    const p = LUT[i];
-    for (const side of [-1, 1]) {
-      const ox = Math.cos(p.ang + Math.PI / 2) * (PATH_W * 0.55) * side;
-      const oy = Math.sin(p.ang + Math.PI / 2) * (PATH_W * 0.55) * side;
-      c.beginPath(); c.moveTo(p.x + ox, p.y + oy);
-      c.quadraticCurveTo(p.x + ox + side * 2, p.y + oy - 6, p.x + ox + (rng2() - 0.5) * 6, p.y + oy - 8);
-      c.stroke();
-    }
-  }
+  drawPondBasin(c);
+  drawBarnRoof(c);
+  drawTractor(c, 250, 155);
+  drawHay(c, 390, 205, -0.3);
+  drawHay(c, 428, 222, 0.4);
+  drawHay(c, 362, 228, 0.1);
   // fences
-  drawFenceRow(c, 8, 70, 8, 200, 36);
-  drawFenceRow(c, 8, 70, 400, 70, 40);
-  drawFenceRow(c, 8, 790, 700, 794, 42);
-  drawFenceRow(c, 8, 430, 8, 790, 36);
-  drawFenceRow(c, 880, 620, 992, 620, 36);
-  drawFenceRow(c, 992, 200, 992, 620, 40);
-  // barn + props
-  drawBarn(c);
-  drawWagonWheel(c, 690, 175, 22);
-  drawWagonWheel(c, 700, 190, 16);
-  // trough
-  c.fillStyle = "#5a3a18"; rr(c, 640, 168, 44, 16, 3); c.fill();
-  c.fillStyle = "rgba(60,110,150,0.7)"; rr(c, 643, 171, 38, 10, 2); c.fill();
-  // windmill
-  c.save(); c.translate(620, 70);
-  c.fillStyle = "#cfc4a8"; c.fillRect(-4, -8, 8, 70);
-  c.fillStyle = "#8a2a1c"; c.beginPath(); c.moveTo(-10, -8); c.lineTo(0, -22); c.lineTo(10, -8); c.fill();
-  c.strokeStyle = "#efe6d0"; c.lineWidth = 3;
-  for (let i = 0; i < 4; i++) {
-    c.save(); c.rotate(i * Math.PI / 2 + 0.3);
-    c.beginPath(); c.moveTo(0, 0); c.lineTo(28, 6); c.lineTo(28, -6); c.closePath(); c.stroke();
-    c.fillStyle = "rgba(239,230,208,0.35)"; c.fill();
-    c.restore();
-  }
-  c.restore();
-  drawGate(c);
-  // sleeping dog
-  c.save(); c.translate(680, 200);
-  c.fillStyle = "#6a4a28"; ellipse(c, 0, 0, 14, 7); c.fill(); ellipse(c, 12, -2, 6, 5); c.fill();
-  c.fillStyle = "#3a2410"; ellipse(c, 14, -5, 2, 3); c.fill();
-  c.strokeStyle = "#5a3a18"; c.lineWidth = 1.5; c.beginPath(); c.moveTo(-12, 2); c.quadraticCurveTo(-20, 8, -14, 4); c.stroke();
-  c.restore();
-  // hay bale
-  c.fillStyle = "#d2b04a"; rr(c, 60, 190, 36, 22, 8); c.fill();
-  c.strokeStyle = "#6a4a18"; c.lineWidth = 1;
-  for (let i = 0; i < 4; i++) { c.beginPath(); c.moveTo(64, 194 + i * 5); c.lineTo(92, 194 + i * 5); c.stroke(); }
-  c.strokeStyle = "#8a2a1c"; c.lineWidth = 2; c.beginPath(); c.moveTo(66, 190); c.lineTo(66, 212); c.moveTo(90, 190); c.lineTo(90, 212); c.stroke();
+  drawFenceSeg(c, 16, HILL_H + 4, 220, HILL_H + 10);
+  drawFenceSeg(c, 300, HILL_H - 2, 500, HILL_H + 6);
+  drawFenceSeg(c, 18, 200, 18, 360);
+  drawFenceSeg(c, 620, 30, 700, 30);
+  drawFenceSeg(c, 980, 480, 980, 760);
+  drawFenceSeg(c, 20, 780, 200, 780);
+  // windmill base (blades live)
+  disc(c, 522, 86, 8, "#e8d8c0", 2.4);
+  c.beginPath(); rr(c, 514, 86, 16, 22, 3); fillStroke(c, "#d0c0a0", 2);
+  // little sign near entrance
+  c.beginPath(); rr(c, 70, 210, 44, 22, 4); fillStroke(c, "#f0dca0", 2);
+  c.fillStyle = INK; c.font = "bold 8px Georgia, serif"; c.textAlign = "center"; c.textBaseline = "middle";
+  c.fillText("SOUTH", 92, 218); c.fillText("FIELD", 92, 227);
 }
 
-/* enemy art */
-function drawMite(c: CanvasRenderingContext2D, t: number, hurt: boolean): void {
-  const leg = Math.sin(t * 14) * 0.4;
-  c.strokeStyle = "#3a2010"; c.lineWidth = 1.3; c.lineCap = "round";
-  for (let i = 0; i < 4; i++) {
-    const a = -0.9 + i * 0.45;
-    c.beginPath(); c.moveTo(-2, 0); c.lineTo(-11, Math.sin(a + leg) * 7); c.stroke();
-    c.beginPath(); c.moveTo(2, 0); c.lineTo(11, Math.sin(a - leg) * 7); c.stroke();
+function drawCropLayer(c: CanvasRenderingContext2D, frame: number): void {
+  const rng = mulberry(21);
+  let n = 0;
+  for (let i = 0; i < 220 && n < 120; i++) {
+    const x = 30 + rng() * 940, y = 130 + rng() * 640;
+    if (!cropAllowed(x, y)) continue;
+    n++;
+    const col = n % 3 === 0 ? "#2f9a32" : n % 3 === 1 ? "#4cd05a" : "#7ae048";
+    drawCropTuft(c, x, y, frame * 1.1 + n * 0.4, col);
   }
-  c.fillStyle = hurt ? "#c06040" : "#7a3a22";
-  ellipse(c, 0, 0, 8, 6); c.fill();
-  c.fillStyle = "#5a2818"; ellipse(c, -3, -1, 3.2, 2.6); c.fill();
-  c.fillStyle = "#e8e0a8"; ellipse(c, 4, -2, 1.4, 1.6); c.fill(); ellipse(c, 4, 1.2, 1.4, 1.6); c.fill();
-  c.fillStyle = "#1a1010"; ellipse(c, 4.5, -2, 0.7, 0.8); c.fill(); ellipse(c, 4.5, 1.2, 0.7, 0.8); c.fill();
+}
+
+function blinkAt(t: number, seed = 0): boolean {
+  return ((t * 0.85 + seed) % 3.6) > 3.38;
+}
+function talkOpen(t: number, talking: boolean): number {
+  if (!talking) return 0;
+  const p = (t * 6.5) % 1;
+  return p < 0.55 ? 0.15 + Math.sin(p * Math.PI * 2) * 0.55 : 0.05;
+}
+
+/* ---------- enemies (top-down cartoon) ---------- */
+function drawMite(c: CanvasRenderingContext2D, t: number, hurt: boolean): void {
+  const w = 1 + Math.sin(t * 14) * 0.08;
+  c.save(); c.scale(w, 2 - w);
+  shadowBlob(c, 0, 7, 8, 4, 0.25);
+  for (let i = 0; i < 6; i++) {
+    const a = (i / 6) * Math.PI * 2 + Math.sin(t * 10 + i) * 0.25;
+    ink(c, 2); c.beginPath(); c.moveTo(0, 0); c.lineTo(Math.cos(a) * 11, Math.sin(a) * 8); c.stroke();
+  }
+  oval(c, 0, 0, 8, 6.5, hurt ? "#f07070" : "#e04038", 2.3);
+  disc(c, 6, 0, 4.2, hurt ? "#f0a0a0" : "#ff7a6a", 2);
+  toonEyes(c, 6, -0.5, 2.1, blinkAt(t, 1), 0.6, 0);
+  toonMouth(c, 8.4, 2.2, 2.6, 0.08, true);
+  c.restore();
 }
 function drawAphid(c: CanvasRenderingContext2D, t: number, hurt: boolean): void {
-  const bob = Math.sin(t * 18) * 1;
-  c.save(); c.translate(0, bob * 0.3);
-  c.strokeStyle = "#2a4a18"; c.lineWidth = 1.2;
-  for (const s of [-1, 1]) { c.beginPath(); c.moveTo(s * 2, 2); c.lineTo(s * 8, 7 + bob); c.stroke(); }
-  c.fillStyle = hurt ? "#a0c040" : "#6aaa38";
-  ellipse(c, 0, 0, 7, 5.5); c.fill();
-  c.fillStyle = "#4a8a28"; ellipse(c, -4, 0, 3.5, 3); c.fill();
-  c.strokeStyle = "#2a4a18"; c.beginPath(); c.moveTo(-5, -3); c.quadraticCurveTo(-9, -10, -7, -12); c.moveTo(-3, -3); c.quadraticCurveTo(-4, -10, -2, -12); c.stroke();
-  c.fillStyle = "#1a2010"; ellipse(c, 4, -1.5, 1, 1.2); c.fill();
+  const w = 1 + Math.sin(t * 16) * 0.1;
+  c.save(); c.scale(w, 2 - w);
+  shadowBlob(c, 0, 7, 7, 3.5, 0.22);
+  oval(c, 0, 0, 8.5, 5.5, hurt ? "#d0f070" : "#7ce03a", 2.2);
+  disc(c, 6, 0, 3.6, "#b8f060", 1.8);
+  toonEyes(c, 6, -0.4, 1.9, blinkAt(t, 2), 0.7, 0);
+  ink(c, 1.6);
+  c.beginPath(); c.moveTo(8, -2); c.quadraticCurveTo(12, -8, 10, -10); c.stroke();
+  c.beginPath(); c.moveTo(8, -1); c.quadraticCurveTo(13, -6, 12, -8); c.stroke();
   c.restore();
 }
 function drawBeetle(c: CanvasRenderingContext2D, t: number, hurt: boolean): void {
-  void t;
-  c.strokeStyle = "#2a1a08"; c.lineWidth = 1.4;
-  for (const s of [-1, 1]) { c.beginPath(); c.moveTo(s * 3, 2); c.lineTo(s * 11, 8); c.moveTo(s * 4, 0); c.lineTo(s * 12, 3); c.stroke(); }
-  c.fillStyle = hurt ? "#6a4a20" : "#3a2a14";
-  ellipse(c, 0, 1, 11, 8); c.fill();
-  c.fillStyle = "#5a4018";
-  c.beginPath(); c.ellipse(0, 0, 10, 8, 0, Math.PI, Math.PI * 2); c.fill();
-  c.strokeStyle = "#c4a050"; c.lineWidth = 1.2;
-  c.beginPath(); c.moveTo(0, -7); c.lineTo(0, 8); c.stroke();
-  c.beginPath(); c.arc(-4, -1, 3, 0, Math.PI * 2); c.stroke(); c.beginPath(); c.arc(4, -1, 3, 0, Math.PI * 2); c.stroke();
-  c.fillStyle = "#1a1008"; ellipse(c, 8, 0, 3, 2.4); c.fill();
-  c.strokeStyle = "#2a1a08"; c.lineWidth = 1.6; c.beginPath(); c.moveTo(8, -1); c.lineTo(13, -6); c.moveTo(8, 1); c.lineTo(13, 5); c.stroke();
+  shadowBlob(c, 0, 9, 11, 5, 0.28);
+  oval(c, 0, 1, 11, 8, hurt ? "#5a5a7a" : "#3a3a58", 2.6);
+  ink(c, 2); c.beginPath(); c.moveTo(0, -6); c.lineTo(0, 8); c.stroke();
+  disc(c, 8, 0, 5, "#2a2a40", 2.2);
+  toonEyes(c, 8, 0, 2.3, blinkAt(t, 3), 0.5, 0);
+  c.fillStyle = "#8af0ff"; disc(c, -4, -3, 2, "#7ae0f0", 1);
+  disc(c, -4, 3, 2, "#7ae0f0", 1);
 }
-function drawCaterpillar(c: CanvasRenderingContext2D, t: number, hurt: boolean, small = false): void {
-  const s = small ? 0.7 : 1;
-  c.save(); c.scale(s, s);
-  const wiggle = Math.sin(t * 8);
-  for (let i = 5; i >= 0; i--) {
-    const x = -12 + i * 5.2, y = Math.sin(t * 8 + i) * 1.6;
-    c.fillStyle = hurt ? "#c8c050" : (i % 2 ? "#7aaa3a" : "#5a8a28");
-    ellipse(c, x, y, 5.2, 4.6); c.fill();
-    if (!small) { c.fillStyle = "#e8e0a0"; ellipse(c, x, y - 3, 1.1, 1.8); c.fill(); }
+function drawCaterpillar(c: CanvasRenderingContext2D, t: number, hurt: boolean): void {
+  shadowBlob(c, 0, 8, 13, 4, 0.22);
+  const col = hurt ? "#f0c070" : "#f0a018";
+  for (let i = 3; i >= 0; i--) {
+    const squ = Math.sin(t * 9 + i) * 1.4;
+    oval(c, -8 + i * 6 + squ * 0.3, Math.sin(t * 9 + i) * 0.8, 5.2, 5.4, i === 3 ? "#ffc04a" : col, 2);
   }
-  c.fillStyle = "#2a3a10"; ellipse(c, 14, wiggle, 1.2, 1.2); c.fill();
-  c.strokeStyle = "#2a3a10"; c.lineWidth = 1; c.beginPath(); c.moveTo(12, -3); c.quadraticCurveTo(16, -9, 14, -11); c.stroke();
-  c.restore();
+  toonEyes(c, 12, -1, 2.2, blinkAt(t, 4), 0.6, 0);
+  toonMouth(c, 15, 2, 3, 0.15, true);
+}
+function drawInchworm(c: CanvasRenderingContext2D, t: number, hurt: boolean): void {
+  const arch = 3 + Math.sin(t * 12) * 3;
+  shadowBlob(c, 0, 7, 8, 3, 0.2);
+  ink(c, 2.4);
+  c.fillStyle = hurt ? "#c0f080" : "#8ce050";
+  c.beginPath(); c.moveTo(-8, 3); c.quadraticCurveTo(0, -arch, 8, 3); c.quadraticCurveTo(0, 6 - arch * 0.2, -8, 3); c.fill(); c.stroke();
+  disc(c, 8, 2, 3.2, "#b0f070", 1.6);
+  toonEyes(c, 8, 1, 1.5, blinkAt(t, 5), 0.5, 0);
 }
 function drawGnat(c: CanvasRenderingContext2D, t: number, hurt: boolean): void {
-  const flap = 0.4 + Math.sin(t * 28) * 0.5;
-  c.fillStyle = "rgba(220,230,255,0.45)";
-  c.save(); c.rotate(-flap); ellipse(c, -2, -6, 7, 3.5); c.fill(); c.restore();
-  c.save(); c.rotate(flap); ellipse(c, 2, -6, 7, 3.5); c.fill(); c.restore();
-  c.strokeStyle = "#2a2010"; c.lineWidth = 1;
-  c.beginPath(); c.moveTo(-2, 2); c.lineTo(-4, 9); c.moveTo(2, 2); c.lineTo(4, 9); c.stroke();
-  c.fillStyle = hurt ? "#6a4a30" : "#3a2a1c";
-  ellipse(c, 0, 0, 5, 6); c.fill();
-  c.fillStyle = "#1a1008"; ellipse(c, 0, -4, 3.2, 2.6); c.fill();
-  c.fillStyle = "#d0c878"; ellipse(c, -1.5, -4, 0.8, 0.8); c.fill(); ellipse(c, 1.5, -4, 0.8, 0.8); c.fill();
+  const flap = Math.sin(t * 28) * 0.5;
+  shadowBlob(c, 0, 14, 7, 3, 0.18);
+  c.save(); c.translate(0, Math.sin(t * 10) * -2);
+  c.save(); c.rotate(-0.6 + flap); oval(c, -2, -2, 8, 3.2, "rgba(230,245,255,0.85)", 1.5); c.restore();
+  c.save(); c.rotate(0.6 - flap); oval(c, -2, 2, 8, 3.2, "rgba(230,245,255,0.85)", 1.5); c.restore();
+  oval(c, 0, 0, 6, 4.5, hurt ? "#c0a0d0" : "#6a5078", 2);
+  disc(c, 4, 0, 3, "#8a70a0", 1.6);
+  toonEyes(c, 4.2, -0.4, 1.8, blinkAt(t, 6), 0.7, 0);
+  c.restore();
 }
 function drawMildew(c: CanvasRenderingContext2D, t: number, hurt: boolean): void {
   c.globalAlpha = 0.82;
-  const col = hurt ? "#d0d0b0" : "#e8e8d0";
-  c.fillStyle = col;
-  ellipse(c, 0, 0, 13, 9); c.fill();
-  c.fillStyle = "#f4f4e8"; ellipse(c, -5, -3, 7, 6); c.fill(); ellipse(c, 6, -2, 6, 5); c.fill(); ellipse(c, 1, 4, 8, 5); c.fill();
-  const rng = (i: number): number => Math.sin(t * 2 + i * 1.7);
-  c.fillStyle = "rgba(200,200,170,0.7)";
-  for (let i = 0; i < 8; i++) {
-    ellipse(c, Math.cos(i + t) * 10, Math.sin(i * 1.4 + t * 0.8) * 7, 1.2 + rng(i) * 0.4, 1.2); c.fill();
-  }
+  const j = Math.sin(t * 4) * 1.5;
+  oval(c, 0, j, 12, 9, hurt ? "#f0e8c0" : "#e8e0c8", 2);
+  for (let i = 0; i < 6; i++) disc(c, Math.cos(i) * 6, j + Math.sin(i * 1.7) * 4, 2.4, "#f8f4dc", 1);
+  toonEyes(c, 2, j - 1, 2.4, blinkAt(t, 7), 0.2, 0);
+  toonMouth(c, 3, j + 3, 3.5, 0.2, false);
   c.globalAlpha = 1;
-  void hurt;
 }
 function drawQueen(c: CanvasRenderingContext2D, t: number, hurt: boolean): void {
-  const leg = Math.sin(t * 8) * 0.3;
-  c.strokeStyle = "#3a1018"; c.lineWidth = 1.6;
-  for (let i = 0; i < 4; i++) {
-    const a = -0.8 + i * 0.4;
-    c.beginPath(); c.moveTo(-4, 0); c.lineTo(-16, Math.sin(a + leg) * 10); c.stroke();
-    c.beginPath(); c.moveTo(4, 0); c.lineTo(16, Math.sin(a - leg) * 10); c.stroke();
-  }
-  c.fillStyle = hurt ? "#a04050" : "#6a1828";
-  ellipse(c, -4, 1, 13, 9); c.fill();
-  c.fillStyle = "#8a2230"; ellipse(c, 8, 0, 7, 6); c.fill();
-  // spine crown
-  c.fillStyle = "#d0a050";
-  for (let i = -2; i <= 2; i++) {
-    c.beginPath(); c.moveTo(6 + i * 2, -4); c.lineTo(8 + i * 2.2, -12); c.lineTo(10 + i * 2, -4); c.fill();
-  }
-  c.fillStyle = "#ffe8a0"; ellipse(c, 11, -2, 1.4, 1.6); c.fill(); ellipse(c, 11, 2, 1.4, 1.6); c.fill();
+  shadowBlob(c, 0, 12, 14, 6, 0.3);
+  oval(c, -2, 2, 13, 10, hurt ? "#f06090" : "#c01858", 2.8);
+  // crown
+  c.beginPath(); c.moveTo(4, -10); c.lineTo(7, -16); c.lineTo(10, -9); c.lineTo(13, -15); c.lineTo(16, -8);
+  fillStroke(c, "#f0c030", 2);
+  disc(c, 10, -2, 6, "#ff6a8a", 2.2);
+  toonEyes(c, 10, -3, 2.6, blinkAt(t, 8), 0.4, 0);
+  toonMouth(c, 13, 1, 4, 0.2, true);
 }
-function drawLocust(c: CanvasRenderingContext2D, t: number, hurt: boolean, king = false): void {
-  const s = king ? 1.55 : 1;
-  c.save(); c.scale(s, s);
-  const flap = 0.2 + Math.sin(t * (king ? 10 : 16)) * 0.25;
-  c.fillStyle = "rgba(200,220,160,0.5)";
-  c.save(); c.rotate(-flap); ellipse(c, -2, -5, king ? 14 : 9, 4); c.fill(); c.restore();
-  c.save(); c.rotate(flap); ellipse(c, 2, -5, king ? 14 : 9, 4); c.fill(); c.restore();
-  c.fillStyle = hurt ? "#8a8a30" : "#5a6a28";
-  ellipse(c, 0, 0, 9, 6); c.fill();
-  c.fillStyle = "#3a4a18"; ellipse(c, 7, 0, 5, 4); c.fill();
-  c.strokeStyle = "#2a3a10"; c.lineWidth = 1.6;
-  c.beginPath(); c.moveTo(-2, 3); c.quadraticCurveTo(-8, 10, -4, 12); c.stroke();
-  c.beginPath(); c.moveTo(2, 3); c.quadraticCurveTo(10, 8, 8, 13); c.stroke();
-  c.fillStyle = "#1a2008"; ellipse(c, 9, -1, 1.2, 1.4); c.fill();
-  if (king) {
-    c.fillStyle = "#e8c050";
-    c.beginPath(); c.moveTo(4, -6); c.lineTo(7, -14); c.lineTo(10, -6); c.fill();
-    c.beginPath(); c.moveTo(8, -5); c.lineTo(13, -12); c.lineTo(14, -5); c.fill();
-    c.strokeStyle = "rgba(232,192,80,0.5)"; c.lineWidth = 3; c.beginPath(); c.arc(0, 0, 16, 0, Math.PI * 2); c.stroke();
-  }
+function drawLocust(c: CanvasRenderingContext2D, t: number, hurt: boolean): void {
+  const flap = Math.sin(t * 16) * 0.35;
+  shadowBlob(c, 0, 14, 9, 4, 0.2);
+  c.save(); c.translate(0, Math.sin(t * 8) * -2);
+  c.save(); c.rotate(-0.7 + flap); oval(c, -1, -3, 10, 4, "#c8e878", 2); c.restore();
+  oval(c, 0, 0, 9, 6, hurt ? "#c0d060" : "#6a9a28", 2.3);
+  disc(c, 7, 0, 4, "#8ab830", 2);
+  toonEyes(c, 7, -0.5, 2, blinkAt(t, 9), 0.6, 0);
+  c.restore();
+}
+function drawKing(c: CanvasRenderingContext2D, t: number, hurt: boolean): void {
+  shadowBlob(c, 0, 16, 18, 7, 0.32);
+  oval(c, 0, 2, 18, 13, hurt ? "#d0c040" : "#3a6a18", 3);
+  disc(c, 12, 0, 8, "#5a8a20", 2.4);
+  toonEyes(c, 12, -1, 3.2, blinkAt(t, 10), 0.5, 0, true);
+  toonMouth(c, 16, 4, 6, 0.35, false);
+  c.fillStyle = "#f0c030"; c.font = "bold 9px Georgia, serif"; c.textAlign = "center";
+  c.fillText("KING", 0, 8);
+}
+function drawJoeBoss(c: CanvasRenderingContext2D, t: number, hurt: boolean): void {
+  shadowBlob(c, 0, 16, 16, 7, 0.3);
+  // top-down Joe with mean face and straw hat brim
+  oval(c, 0, 4, 13, 11, hurt ? "#f0b090" : "#e0a070", 2.6);
+  oval(c, 0, -2, 16, 8, "#d8b04a", 2.6); // hat brim
+  disc(c, 0, -2, 6, "#c49028", 2);
+  toonEyes(c, 0, 3, 2.8, blinkAt(t, 11), 0, 0.4, true);
+  toonMouth(c, 0, 8, 5, 0.25, false);
+  // tin cup
+  c.save(); c.translate(10, 8); c.rotate(0.3);
+  c.beginPath(); rr(c, -5, -4, 10, 8, 2); fillStroke(c, "#c0c8d0", 1.6);
   c.restore();
 }
 
@@ -1052,248 +1102,350 @@ function drawEnemySprite(c: CanvasRenderingContext2D, kind: EnemyId, t: number, 
   if (kind === "mite") drawMite(c, t, hurt);
   else if (kind === "aphid") drawAphid(c, t, hurt);
   else if (kind === "beetle") drawBeetle(c, t, hurt);
-  else if (kind === "caterpillar") drawCaterpillar(c, t, hurt, false);
-  else if (kind === "inchworm") drawCaterpillar(c, t, hurt, true);
+  else if (kind === "caterpillar") drawCaterpillar(c, t, hurt);
+  else if (kind === "inchworm") drawInchworm(c, t, hurt);
   else if (kind === "gnat") drawGnat(c, t, hurt);
   else if (kind === "mildew") drawMildew(c, t, hurt);
   else if (kind === "queen") drawQueen(c, t, hurt);
-  else if (kind === "locust") drawLocust(c, t, hurt, false);
+  else if (kind === "locust") drawLocust(c, t, hurt);
+  else if (kind === "king") drawKing(c, t, hurt);
   else if (kind === "joe") drawJoeBoss(c, t, hurt);
-  else drawLocust(c, t, hurt, true);
 }
 
-/* tower art */
-function post(c: CanvasRenderingContext2D, h = 16): void {
-  c.fillStyle = "#6a4a28"; c.fillRect(-3, 0, 6, h);
-  c.fillStyle = "#8a6238"; c.fillRect(-2, 0, 2, h);
+/* ---------- towers ---------- */
+function starBurst(c: CanvasRenderingContext2D, x: number, y: number, r: number, n: number, fill: string): void {
+  c.beginPath();
+  for (let i = 0; i < n * 2; i++) {
+    const a = (i / (n * 2)) * Math.PI * 2 - Math.PI / 2;
+    const rr = i % 2 === 0 ? r : r * 0.45;
+    const px = x + Math.cos(a) * rr, py = y + Math.sin(a) * rr;
+    if (i === 0) c.moveTo(px, py); else c.lineTo(px, py);
+  }
+  c.closePath(); fillStroke(c, fill, 2);
 }
-function drawLadybugTower(c: CanvasRenderingContext2D, a: number, b: number): void {
-  post(c, 14);
-  c.fillStyle = "#3a6a28";
-  c.beginPath(); c.ellipse(0, -2, 16, 7, 0, 0, Math.PI * 2); c.fill();
-  const bugs = 1 + Math.min(2, a >= 2 ? a : 0);
+
+function drawLadybugTower(c: CanvasRenderingContext2D, a: number, b: number, t: number, anim: number, ang: number): void {
+  shadowBlob(c, 0, 10, 16, 7, 0.28);
+  oval(c, 0, 2, 16, 12, "#c47828", 2.8);
+  // sticks / nest weave
+  ink(c, 1.5); c.strokeStyle = "#6a3a10";
+  for (let i = 0; i < 5; i++) { c.beginPath(); c.arc(0, 2, 6 + i * 2, 0.2, Math.PI - 0.2); c.stroke(); }
+  const bugs = 1 + (a >= 2 ? 1 : 0) + (a >= 3 ? 1 : 0);
   for (let i = 0; i < bugs; i++) {
-    const x = -7 + i * 7, y = -6 - (i % 2) * 3;
-    c.fillStyle = "#c43028"; ellipse(c, x, y, 5, 4); c.fill();
-    c.fillStyle = "#1a1010"; ellipse(c, x + 3, y, 2, 2.4); c.fill();
-    c.fillStyle = "#f0f0f0"; ellipse(c, x - 2, y - 1, 1.2, 1.2); c.fill(); ellipse(c, x + 1, y + 1, 1, 1); c.fill();
+    const a0 = ang + i * 0.9 + t * 0.4;
+    const fly = anim > 0 ? 10 + (1 - anim / 0.32) * 16 : 0;
+    const lx = Math.cos(a0) * (6 + fly), ly = Math.sin(a0) * (5 + fly * 0.6);
+    disc(c, lx, ly, 5, "#e23a2c", 2);
+    c.fillStyle = INK;
+    c.fillRect(lx - 0.6, ly - 3, 1.2, 6);
+    disc(c, lx + 2.4, ly - 1.2, 1.5, "#fffdf0", 1);
   }
-  if (b >= 3) { c.fillStyle = "rgba(200,200,255,0.4)"; ellipse(c, 0, -16, 6, 3); c.fill(); }
-  void b;
-}
-function drawNeemTower(c: CanvasRenderingContext2D, a: number, b: number): void {
-  post(c, 16);
-  c.fillStyle = "#5a6a30"; rr(c, -8, -16, 16, 18, 3); c.fill();
-  c.fillStyle = "#8aaa44"; rr(c, -6, -14, 12, 10, 2); c.fill();
-  c.fillStyle = "#3a4a18"; c.fillRect(-2, -22, 4, 8);
-  c.fillStyle = "#c0c070"; c.beginPath(); c.moveTo(-2, -22); c.lineTo(-10 - a, -28); c.lineTo(-2, -18); c.fill();
-  if (b >= 1) { c.fillStyle = "rgba(160,200,40,0.45)"; ellipse(c, -12, -28, 8, 4); c.fill(); }
-}
-function drawStickyTower(c: CanvasRenderingContext2D, a: number, b: number): void {
-  c.fillStyle = "rgba(200,140,30,0.55)"; ellipse(c, 0, 4, 16 + (a >= 2 ? 4 : 0), 9); c.fill();
-  c.fillStyle = "#e0a84a"; ellipse(c, 0, 2, 13, 7); c.fill();
-  c.fillStyle = "rgba(255,230,140,0.7)"; ellipse(c, -3, 0, 6, 3); c.fill();
-  if (b >= 1) {
-    c.fillStyle = "#5a3a18";
-    for (let i = 0; i < 5; i++) { c.beginPath(); c.moveTo(-8 + i * 4, 4); c.lineTo(-6 + i * 4, -4); c.lineTo(-4 + i * 4, 4); c.fill(); }
-  }
-  if (a >= 4) { c.strokeStyle = "rgba(200,140,30,0.7)"; c.lineWidth = 2; ellipse(c, 0, 2, 18, 10); c.stroke(); }
-}
-function drawScarecrowTower(c: CanvasRenderingContext2D, a: number, b: number): void {
-  post(c, 18);
-  c.strokeStyle = "#8a6238"; c.lineWidth = 3; c.beginPath(); c.moveTo(-12, -6); c.lineTo(12, -6); c.stroke();
-  c.fillStyle = "#c47a2c"; c.fillRect(-7, -20, 14, 16);
-  c.strokeStyle = "#6a3a10"; c.lineWidth = 1; c.strokeRect(-7, -20, 14, 16);
-  // hat
-  c.fillStyle = "#6a4a20"; c.fillRect(-11, -24, 22, 4); c.fillRect(-7, -32, 14, 10);
-  c.fillStyle = "#6a1c14"; c.fillRect(-7, -24, 14, 2);
-  // face
-  c.fillStyle = "#e8d0a0"; ellipse(c, 0, -26, 5, 5); c.fill();
-  c.fillStyle = "#1a1010"; ellipse(c, -1.6, -27, 0.8, 0.8); c.fill(); ellipse(c, 1.6, -27, 0.8, 0.8); c.fill();
-  c.strokeStyle = "#3a2010"; c.beginPath(); c.moveTo(-2, -24); c.lineTo(2, -24); c.stroke();
-  // gun
-  const guns = a >= 3 ? 2 : 1;
-  for (let i = 0; i < guns; i++) {
-    const x = guns === 2 ? -6 + i * 12 : 10;
-    c.save(); c.translate(x, -8); c.rotate(guns === 2 && i === 0 ? -0.4 : 0.2);
-    c.fillStyle = "#2a2a28"; c.fillRect(0, -2, 14 + (b >= 1 ? 4 : 0), 3); c.fillRect(-2, 0, 5, 4);
-    c.restore();
-  }
-}
-function drawMantisTower(c: CanvasRenderingContext2D, a: number, b: number): void {
-  post(c, 14);
-  c.fillStyle = "#6a9a3a";
-  c.beginPath(); c.moveTo(0, -4); c.lineTo(4, -22); c.lineTo(-1, -20); c.closePath(); c.fill();
-  ellipse(c, 1, -24, 4, 3.5); c.fill();
-  c.strokeStyle = "#4a7a28"; c.lineWidth = 2 + (b >= 1 ? 1 : 0);
-  c.beginPath(); c.moveTo(0, -16); c.lineTo(14, -26); c.lineTo(16, -14); c.stroke();
-  c.beginPath(); c.moveTo(0, -14); c.lineTo(12, -8); c.stroke();
-  c.fillStyle = "#d0e080"; ellipse(c, 3, -25, 1, 1); c.fill();
-  if (a >= 2) { c.strokeStyle = "rgba(180,220,80,0.5)"; c.lineWidth = 1.4; c.beginPath(); c.arc(0, -10, 16, -1, 1.2); c.stroke(); }
-}
-function drawPredatoryTower(c: CanvasRenderingContext2D, a: number, b: number): void {
-  post(c, 12);
-  c.fillStyle = "#8a5a2a"; rr(c, -10, -16, 20, 16, 3); c.fill();
-  c.fillStyle = "rgba(180,200,80,0.35)"; rr(c, -8, -14, 16, 10, 2); c.fill();
-  c.strokeStyle = "#5a3a18"; c.lineWidth = 1.4; c.strokeRect(-10, -16, 20, 16);
-  c.fillStyle = "#5a3a18"; c.fillRect(-10, -4, 20, 5);
-  const n = 2 + Math.min(3, a);
-  for (let i = 0; i < n; i++) {
-    c.fillStyle = "#3a2010"; ellipse(c, -6 + i * 5, -18 - (i % 2) * 3, 2.2, 1.6); c.fill();
-  }
-  void b;
-}
-function drawUvTower(c: CanvasRenderingContext2D, a: number, b: number): void {
-  c.fillStyle = "#4a4a50"; c.fillRect(-3, 0, 6, 14);
-  c.fillStyle = "#2a2a30"; c.fillRect(-8, 12, 16, 4);
-  const glow = b >= 1 ? "#b0a0ff" : "#8a7cff";
-  c.fillStyle = "rgba(140,120,255,0.28)"; ellipse(c, 0, -16, 14 + a * 2, 10); c.fill();
-  c.fillStyle = glow; ellipse(c, 0, -16, 8, 6); c.fill();
-  c.fillStyle = "#f4f0ff"; ellipse(c, -2, -18, 3, 2); c.fill();
-  c.strokeStyle = "#3a3a48"; c.lineWidth = 2; c.beginPath(); c.moveTo(-8, -8); c.lineTo(0, -10); c.lineTo(8, -8); c.stroke();
-}
-function drawDusterTower(c: CanvasRenderingContext2D, a: number, b: number): void {
-  // windsock pole + little plane
-  c.fillStyle = "#6a4a28"; c.fillRect(-2, -16, 4, 28);
-  c.fillStyle = "#c47a2c";
-  c.beginPath(); c.moveTo(2, -14); c.lineTo(16, -11); c.lineTo(16, -7); c.lineTo(2, -8); c.closePath(); c.fill();
-  c.fillStyle = "#4a7ab0";
-  c.save(); c.translate(0, -6); c.rotate(-0.3);
-  c.fillRect(-10, -3, 18, 6);
-  c.fillRect(4, -8, 3, 12);
-  c.fillStyle = "#d0d8e0"; c.fillRect(-14, -2, 6, 4);
-  if (a >= 4 || b >= 1) { c.fillStyle = "#e8c050"; c.fillRect(6, -2, 5, 3); }
-  c.restore();
-  c.fillStyle = "#5a3a18"; c.fillRect(-10, 10, 20, 4);
+  if (b > 0) disc(c, 0, 2, 3, "#f0d060", 1.4);
 }
 
-function drawTowerSprite(c: CanvasRenderingContext2D, kind: TowerId, a: number, b: number): void {
-  if (kind === "ladybug") drawLadybugTower(c, a, b);
-  else if (kind === "neem") drawNeemTower(c, a, b);
-  else if (kind === "sticky") drawStickyTower(c, a, b);
-  else if (kind === "scarecrow") drawScarecrowTower(c, a, b);
-  else if (kind === "mantis") drawMantisTower(c, a, b);
-  else if (kind === "predatory") drawPredatoryTower(c, a, b);
-  else if (kind === "uv") drawUvTower(c, a, b);
-  else drawDusterTower(c, a, b);
+function drawNeemTower(c: CanvasRenderingContext2D, a: number, b: number, t: number, anim: number, ang: number): void {
+  shadowBlob(c, 0, 12, 14, 7, 0.26);
+  c.beginPath(); rr(c, -11, -10, 22, 22, 5); fillStroke(c, "#3d7a24", 2.6);
+  oval(c, 0, -2, 8, 6, "#b6e05a", 2);
+  c.save(); c.rotate(ang);
+  c.beginPath(); rr(c, 8, -4, 14, 8, 3); fillStroke(c, "#d8e070", 2);
+  if (anim > 0) {
+    c.globalAlpha = anim / 0.32;
+    oval(c, 28, 0, 12 + (0.32 - anim) * 20, 8, "rgba(180,224,90,0.55)", 0);
+    c.globalAlpha = 1;
+  }
+  c.restore();
+  c.fillStyle = "#e8f090"; c.font = "bold 8px Georgia, serif"; c.textAlign = "center"; c.fillText("NEEM", 0, 6);
+  void t; void a; void b;
+}
+
+function drawStickyTower(c: CanvasRenderingContext2D, a: number, b: number, t = 0, anim = 0): void {
+  oval(c, 0, 0, 18, 12, "#e8b84a", 2.6);
+  oval(c, 0, 0, 12, 8, "#f4d878", 1.8);
+  const wob = Math.sin(t * 4) * 1;
+  disc(c, -4 + wob, -2, 3, "rgba(80,40,10,0.35)", 0);
+  disc(c, 5, 2, 2.2, "rgba(80,40,10,0.3)", 0);
+  if (b > 0) {
+    ink(c, 2); c.beginPath(); c.moveTo(-10, 0); c.lineTo(0, -8); c.lineTo(10, 0); c.stroke();
+  }
+  void a; void anim;
+}
+
+function drawScarecrowTower(c: CanvasRenderingContext2D, a: number, b: number, t: number, anim: number, ang: number): void {
+  shadowBlob(c, 0, 12, 14, 6, 0.26);
+  const rec = anim > 0 ? -6 * (anim / 0.32) : 0;
+  c.save(); c.rotate(ang);
+  c.translate(rec, 0);
+  // coat + hat from above
+  oval(c, 0, 2, 13, 11, "#c46a28", 2.6);
+  oval(c, 2, 0, 10, 8, "#d88a40", 2);
+  oval(c, 1, -6, 14, 7, "#6a3a14", 2.4); // hat brim
+  disc(c, 1, -6, 5, "#4a2810", 2);
+  toonEyes(c, 4, 0, 2.2, blinkAt(t, 20), 0.5, 0);
+  // revolver
+  c.beginPath(); rr(c, 10, -3, 14, 6, 2); fillStroke(c, "#2a2418", 2);
+  if (anim > 0) {
+    c.globalAlpha = anim / 0.32;
+    starBurst(c, 26, 0, 8 + (0.32 - anim) * 10, 6, "#fff3a0");
+    c.globalAlpha = 1;
+  }
+  c.restore();
+  void a; void b;
+}
+
+function drawMantisTower(c: CanvasRenderingContext2D, a: number, b: number, t: number, anim: number, ang: number): void {
+  shadowBlob(c, 0, 12, 13, 6, 0.26);
+  disc(c, 0, 4, 7, "#8a6a30", 2.2); // post
+  const swipe = anim > 0 ? (0.32 - anim) * 2.4 - 0.6 : Math.sin(t * 2) * 0.15;
+  oval(c, 0, -2, 9, 11, "#6ec02a", 2.6);
+  disc(c, 3, -8, 5.5, "#8ae048", 2);
+  toonEyes(c, 4, -9, 2.3, blinkAt(t, 21), 0.4, -0.2);
+  c.save(); c.rotate(ang + swipe);
+  ink(c, 3); c.strokeStyle = "#3a8a18";
+  c.beginPath(); c.moveTo(4, -2); c.lineTo(18, -10); c.lineTo(22, -4); c.stroke();
+  c.beginPath(); c.moveTo(4, 2); c.lineTo(18, 10); c.lineTo(22, 4); c.stroke();
+  if (anim > 0) {
+    c.globalAlpha = anim / 0.32;
+    c.strokeStyle = "#d0ff80"; c.lineWidth = 3;
+    c.beginPath(); c.arc(0, 0, 22, ang - 0.9, ang + 0.9); c.stroke();
+    c.globalAlpha = 1;
+  }
+  c.restore();
+  void a; void b;
+}
+
+function drawPredatoryTower(c: CanvasRenderingContext2D, a: number, b: number, t: number): void {
+  shadowBlob(c, 0, 12, 13, 6, 0.26);
+  c.beginPath(); rr(c, -12, -10, 24, 20, 4); fillStroke(c, "#8a5a2a", 2.6);
+  c.beginPath(); rr(c, -9, -7, 18, 12, 3); fillStroke(c, "#c49050", 2);
+  for (let i = 0; i < 3; i++) {
+    const ax = Math.cos(t * 3 + i * 2) * 5, ay = Math.sin(t * 4 + i) * 3;
+    disc(c, ax, ay, 2.6, "#5a3020", 1.4);
+    disc(c, ax + 1.4, ay - 0.6, 0.8, "#fff", 0);
+  }
+  void a; void b;
+}
+
+function drawUvTower(c: CanvasRenderingContext2D, a: number, b: number, t: number, anim: number): void {
+  shadowBlob(c, 0, 12, 12, 6, 0.24);
+  c.beginPath(); rr(c, -6, -4, 12, 16, 3); fillStroke(c, "#3a2a68", 2.4);
+  const glow = 6 + Math.sin(t * 6) * 1.5 + (anim > 0 ? 4 : 0);
+  disc(c, 0, -8, glow, "#b8a0ff", 2);
+  disc(c, 0, -8, 4, "#f0e8ff", 1.5);
+  void a; void b;
+}
+
+function drawDusterTower(c: CanvasRenderingContext2D, a: number, b: number, t: number): void {
+  shadowBlob(c, 0, 12, 16, 7, 0.26);
+  disc(c, 0, 2, 14, "#6a90c0", 2.6);
+  disc(c, 0, 2, 8, "#d0e4f8", 2);
+  // windsock
+  const w = Math.sin(t * 3) * 0.4;
+  c.save(); c.rotate(-0.4 + w);
+  c.beginPath(); c.moveTo(6, -10); c.lineTo(22, -14); c.lineTo(22, -4); c.lineTo(6, -8); c.closePath();
+  fillStroke(c, "#f0c030", 2);
+  c.restore();
+  oval(c, 0, 2, 5, 3, "#f0d060", 1.6);
+  void a; void b;
+}
+
+function drawTowerSprite(c: CanvasRenderingContext2D, kind: TowerId, a: number, b: number, t = 0, anim = 0, ang = 0): void {
+  if (kind === "ladybug") drawLadybugTower(c, a, b, t, anim, ang);
+  else if (kind === "neem") drawNeemTower(c, a, b, t, anim, ang);
+  else if (kind === "sticky") drawStickyTower(c, a, b, t, anim);
+  else if (kind === "scarecrow") drawScarecrowTower(c, a, b, t, anim, ang);
+  else if (kind === "mantis") drawMantisTower(c, a, b, t, anim, ang);
+  else if (kind === "predatory") drawPredatoryTower(c, a, b, t);
+  else if (kind === "uv") drawUvTower(c, a, b, t, anim);
+  else if (kind === "duster") drawDusterTower(c, a, b, t);
 }
 
 function drawPlane(c: CanvasRenderingContext2D, p: Plane): void {
-  c.save(); c.translate(p.x, p.y); c.rotate(p.ang);
-  c.fillStyle = "rgba(0,0,0,0.25)"; ellipse(c, 4, 14, 18, 5); c.fill();
-  c.fillStyle = "#cfd6de"; c.fillRect(-18, -4, 32, 8);
-  c.fillStyle = "#4a7ab0"; c.fillRect(-4, -14, 6, 28);
-  c.fillStyle = "#8a2a1c"; c.fillRect(10, -6, 8, 4);
-  c.fillStyle = "#e8c050"; c.beginPath(); c.moveTo(14, -2); c.lineTo(22, 0); c.lineTo(14, 2); c.fill();
-  c.fillStyle = "rgba(200,220,140,0.35)"; ellipse(c, -16, 8, 14, 5); c.fill();
+  // flyover shadow first
+  c.save();
+  c.translate(p.x + 8, p.y + 22);
+  c.rotate(p.ang);
+  c.fillStyle = "rgba(20,12,4,0.35)";
+  c.beginPath(); c.ellipse(0, 0, 28, 10, 0, 0, Math.PI * 2); c.fill();
+  c.restore();
+  c.save();
+  c.translate(p.x, p.y);
+  c.rotate(p.ang);
+  // top-down cartoon biplane
+  oval(c, 0, 0, 22, 7, "#f0d24a", 2.4);
+  c.beginPath(); rr(c, -6, -16, 12, 32, 3); fillStroke(c, "#e8c040", 2.2);
+  c.beginPath(); rr(c, 8, -5, 14, 10, 2); fillStroke(c, "#d43c28", 2);
+  disc(c, -16, 0, 5, "#c0d8e8", 2);
+  disc(c, 2, 0, 3, "#7ad4f0", 1.5);
   c.restore();
 }
 
-function drawJohnPortrait(c: CanvasRenderingContext2D, w: number, h: number): void {
-  c.clearRect(0, 0, w, h);
-  const g = c.createLinearGradient(0, 0, 0, h);
-  g.addColorStop(0, "#3a2a18"); g.addColorStop(1, "#1c140c");
-  c.fillStyle = g; c.fillRect(0, 0, w, h);
-  c.save(); c.translate(w / 2, h * 0.62); const s = Math.min(w, h) / 90;
-  c.scale(s, s);
-  // shoulders
-  c.fillStyle = "#3a4a6a"; ellipse(c, 0, 38, 38, 20); c.fill();
-  c.fillStyle = "#5a1c18"; c.beginPath(); c.moveTo(-18, 16); c.lineTo(0, 36); c.lineTo(18, 16); c.lineTo(14, 8); c.lineTo(-14, 8); c.closePath(); c.fill();
-  // neck / face
-  c.fillStyle = "#d2a878"; c.fillRect(-8, 4, 16, 12);
-  ellipse(c, 0, -6, 16, 18); c.fill();
-  // ears
-  ellipse(c, -16, -4, 4, 6); c.fill(); ellipse(c, 16, -4, 4, 6); c.fill();
-  // mustache
-  c.fillStyle = "#4a3018";
-  c.beginPath(); c.moveTo(-12, 6); c.quadraticCurveTo(0, 14, 12, 6); c.quadraticCurveTo(0, 8, -12, 6); c.fill();
-  // eyes
-  c.fillStyle = "#1a1008"; ellipse(c, -6, -8, 2, 2.2); c.fill(); ellipse(c, 6, -8, 2, 2.2); c.fill();
-  c.strokeStyle = "#5a3a20"; c.lineWidth = 1.4; c.beginPath(); c.moveTo(-10, -11); c.lineTo(-3, -12); c.moveTo(10, -11); c.lineTo(3, -12); c.stroke();
-  // hat
-  c.fillStyle = "#6a4a20";
-  ellipse(c, 0, -18, 28, 6); c.fill();
-  c.beginPath(); c.moveTo(-14, -18); c.quadraticCurveTo(-12, -38, 0, -40); c.quadraticCurveTo(12, -38, 14, -18); c.fill();
-  c.fillStyle = "#6a1c14"; c.fillRect(-14, -22, 28, 3);
-  c.fillStyle = "#e8c878"; c.fillRect(-4, -22, 8, 3);
-  c.restore();
-}
-
-function drawJoePortrait(c: CanvasRenderingContext2D, w: number, h: number, mean = false): void {
-  c.clearRect(0, 0, w, h);
-  const g = c.createLinearGradient(0, 0, 0, h);
-  g.addColorStop(0, mean ? "#2a1810" : "#3a3020"); g.addColorStop(1, "#1c140c");
-  c.fillStyle = g; c.fillRect(0, 0, w, h);
-  c.save(); c.translate(w / 2, h * 0.62); const s = Math.min(w, h) / 90;
-  c.scale(s, s);
-  // shoulders — olive work shirt, not John's denim
-  c.fillStyle = mean ? "#3a4a28" : "#6a7a40"; ellipse(c, 0, 38, 36, 20); c.fill();
-  c.fillStyle = "#c4b48a"; c.fillRect(-8, 10, 16, 8);
-  // face, clean-shaven
-  c.fillStyle = "#e0b888"; c.fillRect(-8, 4, 16, 12);
-  ellipse(c, 0, -6, 15, 17); c.fill();
-  ellipse(c, -15, -3, 3.5, 5.5); c.fill(); ellipse(c, 15, -3, 3.5, 5.5); c.fill();
-  // mouth
-  c.strokeStyle = mean ? "#6a3020" : "#8a5a3a"; c.lineWidth = 1.6;
-  if (mean) { c.beginPath(); c.moveTo(-6, 6); c.lineTo(6, 6); c.stroke(); }
-  else { c.beginPath(); c.arc(0, 4, 6, 0.15, Math.PI - 0.15); c.stroke(); }
-  // eyes
-  c.fillStyle = "#1a1008"; ellipse(c, -5.5, -8, 2, mean ? 1.4 : 2.1); c.fill(); ellipse(c, 5.5, -8, 2, mean ? 1.4 : 2.1); c.fill();
-  if (mean) { c.strokeStyle = "#4a2010"; c.beginPath(); c.moveTo(-9, -12); c.lineTo(-3, -9); c.moveTo(9, -12); c.lineTo(3, -9); c.stroke(); }
-  // straw hat (flatter, distinct from John's)
-  c.fillStyle = "#d2b05a";
-  ellipse(c, 0, -16, 30, 5); c.fill();
-  c.beginPath(); c.moveTo(-16, -16); c.quadraticCurveTo(-10, -30, 0, -31); c.quadraticCurveTo(10, -30, 16, -16); c.fill();
-  c.fillStyle = "#3a4a24"; c.fillRect(-16, -18, 32, 3);
-  // little tin cup, a wink at his name — not a machine
-  c.fillStyle = "#8a8a84"; rr(c, 16, 10, 10, 10, 2); c.fill();
-  c.strokeStyle = "#6a6a64"; c.lineWidth = 2; c.beginPath(); c.arc(27, 15, 4, -0.8, 0.8); c.stroke();
-  c.restore();
-}
-
-function drawFarmhand(c: CanvasRenderingContext2D, who: "john" | "joe", t: number): void {
-  const bob = Math.sin(t * 2) * 1.2;
+type FarmAct = "idle" | "talk" | "hat" | "sip" | "mean";
+function drawFarmhand(c: CanvasRenderingContext2D, who: "john" | "joe", t: number, act: FarmAct = "idle"): void {
+  const bob = Math.sin(t * 2.4) * 1.6;
   c.save(); c.translate(0, bob);
+  shadowBlob(c, 0, 14, 12, 6, 0.28);
+  const shirt = who === "john" ? "#3a6aaa" : "#6a8a3a";
+  oval(c, 0, 6, 11, 9, shirt, 2.4);
+  const skin = who === "john" ? "#e0a070" : "#e8b888";
+  disc(c, 0, -2, 8.5, skin, 2.2);
+  // hat
+  const tip = act === "hat" ? -10 - Math.sin(t * 6) * 2 : 0;
+  const tilt = act === "hat" ? -0.35 : 0;
+  c.save(); c.translate(0, -6 + tip); c.rotate(tilt);
   if (who === "john") {
-    c.fillStyle = "#3a4a6a"; ellipse(c, 0, 16, 10, 6); c.fill();
-    c.fillStyle = "#5a1c18"; c.beginPath(); c.moveTo(-6, 4); c.lineTo(0, 12); c.lineTo(6, 4); c.closePath(); c.fill();
-    c.fillStyle = "#d2a878"; ellipse(c, 0, -2, 6, 7); c.fill();
-    c.fillStyle = "#4a3018"; c.beginPath(); c.moveTo(-5, 2); c.quadraticCurveTo(0, 5, 5, 2); c.fill();
-    c.fillStyle = "#6a4a20"; ellipse(c, 0, -6, 10, 2.2); c.fill();
-    c.beginPath(); c.moveTo(-5, -6); c.quadraticCurveTo(0, -16, 5, -6); c.fill();
-    c.fillStyle = "#6a1c14"; c.fillRect(-5, -7, 10, 1.6);
+    oval(c, 0, 2, 14, 6, "#4a3010", 2.3);
+    c.beginPath(); rr(c, -6, -6, 12, 8, 2); fillStroke(c, "#3a240c", 2);
   } else {
-    c.fillStyle = "#6a7a40"; ellipse(c, 0, 16, 10, 6); c.fill();
-    c.fillStyle = "#c4b48a"; c.fillRect(-4, 6, 8, 5);
-    c.fillStyle = "#e0b888"; ellipse(c, 0, -2, 5.8, 6.5); c.fill();
-    c.fillStyle = "#d2b05a"; ellipse(c, 0, -6, 11, 2); c.fill();
-    c.beginPath(); c.moveTo(-6, -6); c.quadraticCurveTo(0, -14, 6, -6); c.fill();
-    c.fillStyle = "#3a4a24"; c.fillRect(-6, -7, 12, 1.5);
-    // cup in hand
-    c.fillStyle = "#8a8a84"; c.fillRect(7, 6, 5, 5);
+    oval(c, 0, 2, 14, 6, "#d8b04a", 2.3);
+    c.beginPath(); rr(c, -6, -5, 12, 7, 2); fillStroke(c, "#c49028", 2);
   }
-  c.fillStyle = "#1a1008"; ellipse(c, -2, -3, 0.8, 0.9); c.fill(); ellipse(c, 2, -3, 0.8, 0.9); c.fill();
+  c.restore();
+  const mad = who === "joe" && act === "mean";
+  toonEyes(c, 0, -3, 2.4, blinkAt(t, who === "john" ? 30 : 31), 0, mad ? 0.4 : 0, mad);
+  if (who === "john") {
+    // mustache
+    ink(c, 2); c.beginPath(); c.arc(0, 1.5, 3.2, 0.15, Math.PI - 0.15); c.stroke();
+  }
+  const open = talkOpen(t, act === "talk" || act === "hat" || act === "sip");
+  toonMouth(c, 0, 3.4, 4.2, act === "sip" ? 0.4 : open, !mad);
+  if (who === "joe") {
+    const sip = act === "sip";
+    c.save();
+    c.translate(sip ? 4 : 10, sip ? -2 : 8);
+    c.rotate(sip ? -0.9 : 0.4);
+    c.beginPath(); rr(c, -5, -4, 9, 8, 2); fillStroke(c, "#c8d0d6", 1.6);
+    c.beginPath(); c.arc(5, 0, 3, -0.8, 0.8); ink(c, 1.6); c.stroke();
+    if (sip) {
+      c.fillStyle = "#5a3a18"; c.globalAlpha = 0.5;
+      c.beginPath(); c.ellipse(0, -6, 3, 2, 0, 0, Math.PI * 2); c.fill();
+      c.globalAlpha = 1;
+    }
+    c.restore();
+  }
   c.restore();
 }
 
-function drawJoeBoss(c: CanvasRenderingContext2D, t: number, hurt: boolean): void {
-  const flap = 0.15 + Math.sin(t * 10) * 0.2;
-  c.fillStyle = "rgba(200,220,140,0.35)";
-  c.save(); c.rotate(-flap); ellipse(c, -8, -10, 14, 5); c.fill(); c.restore();
-  c.save(); c.rotate(flap); ellipse(c, 8, -10, 14, 5); c.fill(); c.restore();
-  c.fillStyle = hurt ? "#4a3a20" : "#3a4a28";
-  ellipse(c, 0, 6, 12, 10); c.fill();
-  c.fillStyle = "#e0b888"; ellipse(c, 0, -2, 8, 8); c.fill();
-  c.fillStyle = "#d2b05a"; ellipse(c, 0, -6, 14, 3); c.fill();
-  c.beginPath(); c.moveTo(-7, -6); c.quadraticCurveTo(0, -16, 7, -6); c.fill();
-  c.fillStyle = "#3a4a24"; c.fillRect(-7, -8, 14, 2);
-  c.fillStyle = "#1a1008"; ellipse(c, -2.5, -3, 1.2, 1); c.fill(); ellipse(c, 2.5, -3, 1.2, 1); c.fill();
-  c.strokeStyle = "#6a3020"; c.lineWidth = 1.4; c.beginPath(); c.moveTo(-4, 2); c.lineTo(4, 2); c.stroke();
-  c.strokeStyle = "rgba(232,192,80,0.45)"; c.lineWidth = 3; c.beginPath(); c.arc(0, 0, 18, 0, Math.PI * 2); c.stroke();
+function portraitBg(c: CanvasRenderingContext2D, w: number, h: number, mean = false): void {
+  const g = c.createLinearGradient(0, 0, 0, h);
+  if (mean) { g.addColorStop(0, "#4a2030"); g.addColorStop(1, "#1a0c10"); }
+  else { g.addColorStop(0, "#5a9a48"); g.addColorStop(1, "#c4a060"); }
+  c.fillStyle = g; c.fillRect(0, 0, w, h);
 }
 
-/* sprite cache */
-const SPR: { farm?: HTMLCanvasElement; plant: HTMLCanvasElement[]; john?: HTMLCanvasElement; joe?: HTMLCanvasElement; joeMean?: HTMLCanvasElement } = { plant: [] };
+function drawJohnPortrait(c: CanvasRenderingContext2D, w: number, h: number, t = 0, talk = false, hatTip = false): void {
+  portraitBg(c, w, h, false);
+  const cx = w * 0.5, cy = h * 0.58;
+  // shoulders
+  c.beginPath(); rr(c, cx - 58, cy + 28, 116, 70, 16); fillStroke(c, "#3a6aaa", 3);
+  c.beginPath(); rr(c, cx - 14, cy + 20, 28, 40, 6); fillStroke(c, "#c43c2c", 2.4); // bandana
+  // neck + head
+  oval(c, cx, cy + 16, 16, 12, "#e0a070", 2);
+  disc(c, cx, cy - 6, 36, "#e0a070", 3);
+  // ears
+  disc(c, cx - 34, cy, 8, "#e0a070", 2);
+  disc(c, cx + 34, cy, 8, "#e0a070", 2);
+  const tipY = hatTip ? -18 - Math.sin(t * 7) * 3 : 0;
+  const tipR = hatTip ? -0.28 : 0;
+  c.save(); c.translate(cx, cy - 34 + tipY); c.rotate(tipR);
+  oval(c, 0, 10, 58, 14, "#4a3010", 3);
+  c.beginPath(); rr(c, -28, -22, 56, 32, 8); fillStroke(c, "#3a240c", 3);
+  c.beginPath(); rr(c, -22, 4, 44, 8, 2); fillStroke(c, "#c43c2c", 2);
+  c.restore();
+  toonEyes(c, cx, cy - 10, 9, blinkAt(t, 40), talk ? Math.sin(t * 2) * 0.2 : 0, 0.1, false);
+  // mustache
+  c.fillStyle = "#5a3a18";
+  c.beginPath(); c.ellipse(cx - 12, cy + 8, 14, 6, -0.2, 0, Math.PI * 2); c.fill(); ink(c, 2); c.stroke();
+  c.beginPath(); c.ellipse(cx + 12, cy + 8, 14, 6, 0.2, 0, Math.PI * 2); c.fill(); c.stroke();
+  toonMouth(c, cx, cy + 20, 16, talkOpen(t, talk), true);
+}
+
+function drawJoePortrait(c: CanvasRenderingContext2D, w: number, h: number, mean = false, t = 0, talk = false, sip = false): void {
+  portraitBg(c, w, h, mean);
+  const cx = w * 0.5, cy = h * 0.58;
+  c.beginPath(); rr(c, cx - 58, cy + 28, 116, 70, 16); fillStroke(c, mean ? "#4a3020" : "#6a8a3a", 3);
+  oval(c, cx, cy + 16, 16, 12, "#e8b888", 2);
+  disc(c, cx, cy - 4, 36, "#e8b888", 3);
+  disc(c, cx - 34, cy + 2, 8, "#e8b888", 2);
+  disc(c, cx + 34, cy + 2, 8, "#e8b888", 2);
+  c.save(); c.translate(cx, cy - 32);
+  oval(c, 0, 12, 60, 14, "#d8b04a", 3);
+  c.beginPath(); rr(c, -26, -18, 52, 28, 8); fillStroke(c, "#c49028", 3);
+  // straw lines
+  ink(c, 1.2); c.strokeStyle = "#8a6010";
+  for (let i = -18; i <= 18; i += 6) { c.beginPath(); c.moveTo(i, -14); c.lineTo(i, 8); c.stroke(); }
+  c.restore();
+  toonEyes(c, cx, cy - 8, 9.5, blinkAt(t, 41), 0, mean ? 0.45 : 0.1, mean);
+  toonMouth(c, cx, cy + 16, 18, sip ? 0.55 : talkOpen(t, talk), !mean);
+  // tin cup
+  c.save();
+  const cupX = sip ? cx + 16 : cx + 52, cupY = sip ? cy + 8 : cy + 42;
+  c.translate(cupX, cupY); c.rotate(sip ? -0.9 : 0.15);
+  c.beginPath(); rr(c, -14, -12, 28, 26, 5); fillStroke(c, "#c8d0d6", 2.4);
+  c.beginPath(); rr(c, -10, -8, 20, 10, 3); fillStroke(c, "#5a3a18", 1.6);
+  c.beginPath(); c.arc(14, 0, 8, -1, 1); ink(c, 2.4); c.stroke();
+  if (sip) {
+    c.fillStyle = "rgba(90,50,20,0.4)";
+    c.beginPath(); c.ellipse(-2, -16, 8, 5, 0, 0, Math.PI * 2); c.fill();
+  }
+  c.restore();
+}
+
+function drawClouds(c: CanvasRenderingContext2D, t: number): void {
+  const clouds = [
+    { x: 80, y: 40, s: 1, v: 8 },
+    { x: 420, y: 22, s: 1.3, v: 5 },
+    { x: 760, y: 50, s: 0.9, v: 7 },
+  ];
+  c.fillStyle = "rgba(244,240,224,0.5)";
+  for (const cl of clouds) {
+    const x = ((cl.x + t * cl.v) % (WW + 160)) - 80;
+    c.beginPath(); c.ellipse(x, cl.y, 36 * cl.s, 14 * cl.s, 0, 0, Math.PI * 2); c.fill();
+    c.beginPath(); c.ellipse(x + 22 * cl.s, cl.y + 2, 24 * cl.s, 12 * cl.s, 0, 0, Math.PI * 2); c.fill();
+  }
+}
+
+function drawWindmillBlades(c: CanvasRenderingContext2D, t: number): void {
+  c.save(); c.translate(522, 74); c.rotate(t * 1.2);
+  for (let i = 0; i < 4; i++) {
+    c.rotate(Math.PI / 2);
+    c.beginPath(); c.moveTo(0, 0); c.lineTo(6, 4); c.lineTo(6, 28); c.lineTo(-6, 28); c.lineTo(-6, 4); c.closePath();
+    fillStroke(c, i % 2 ? "#f0e8d0" : "#d0b070", 2);
+  }
+  disc(c, 0, 0, 5, "#e8c050", 2);
+  c.restore();
+}
+
+function drawPondShimmer(c: CanvasRenderingContext2D, t: number): void {
+  c.globalAlpha = 0.35 + Math.sin(t * 2) * 0.12;
+  oval(c, POND.x - 8 + Math.sin(t) * 3, POND.y - 6, 16, 6, "#c8f4ff", 0);
+  c.globalAlpha = 0.25;
+  oval(c, POND.x + 10, POND.y + 4 + Math.cos(t * 1.3) * 2, 10, 4, "#e8ffff", 0);
+  c.globalAlpha = 1;
+}
+
+function drawBetrayalSwarm(c: CanvasRenderingContext2D, t: number): void {
+  const kinds: EnemyId[] = ["mite", "beetle", "locust", "caterpillar", "aphid", "gnat", "queen"];
+  for (let i = 0; i < 36; i++) {
+    const lane = (i % 10) / 9;
+    const x0 = 30 + lane * 940 + Math.sin(i * 1.7) * 28;
+    const delay = (i % 12) * 0.16;
+    const prog = Math.max(0, t - delay);
+    if (prog <= 0) continue;
+    const y = -36 + prog * (48 + (i % 7) * 6);
+    if (y > 320) continue;
+    const x = x0 + Math.sin(prog * 3.2 + i) * 18;
+    c.save();
+    c.translate(x, y);
+    c.rotate(Math.PI / 2 + Math.sin(prog * 8 + i) * 0.2);
+    const sq = 1 + Math.sin(prog * 10 + i) * 0.1;
+    c.scale(0.9 * sq, 0.9 / sq);
+    drawEnemySprite(c, kinds[i % kinds.length], t + i, false);
+    c.restore();
+  }
+}
+
+const SPR: { farm?: HTMLCanvasElement; plant: HTMLCanvasElement[]; enemy: Partial<Record<EnemyId, HTMLCanvasElement[]>> } = { plant: [], enemy: {} };
 function makeC(w: number, h: number): HTMLCanvasElement {
   const c = document.createElement("canvas"); c.width = w; c.height = h; return c;
 }
@@ -1301,27 +1453,30 @@ function ensureSprites(): void {
   if (SPR.farm) return;
   const farm = makeC(WW, WH);
   const fc = farm.getContext("2d");
-  if (fc) { fc.imageSmoothingEnabled = true; drawFarmBg(fc); }
+  if (fc) { fc.imageSmoothingEnabled = true; drawFarmBg(fc); drawCropLayer(fc, 1); }
   SPR.farm = farm;
   for (let i = 0; i < 5; i++) {
-    const p = makeC(160, 180);
+    const p = makeC(140, 140);
     const pc = p.getContext("2d");
-    if (pc) { pc.translate(80, 140); drawPlant(pc, i / 4, 0); }
+    if (pc) { pc.imageSmoothingEnabled = true; pc.translate(70, 70); drawPlant(pc, i / 4, 0); }
     SPR.plant.push(p);
   }
-  const j = makeC(160, 180);
-  const jc = j.getContext("2d");
-  if (jc) drawJohnPortrait(jc, 160, 180);
-  SPR.john = j;
-  const jo = makeC(160, 180);
-  const joc = jo.getContext("2d");
-  if (joc) drawJoePortrait(joc, 160, 180, false);
-  SPR.joe = jo;
-  const jm = makeC(160, 180);
-  const jmc = jm.getContext("2d");
-  if (jmc) drawJoePortrait(jmc, 160, 180, true);
-  SPR.joeMean = jm;
+  for (const kind of EIDS) {
+    const frames: HTMLCanvasElement[] = [];
+    for (let f = 0; f < 3; f++) {
+      const p = makeC(72, 72);
+      const pc = p.getContext("2d");
+      if (pc) {
+        pc.imageSmoothingEnabled = true;
+        pc.translate(36, 36);
+        drawEnemySprite(pc, kind, f * 0.22, false);
+      }
+      frames.push(p);
+    }
+    SPR.enemy[kind] = frames;
+  }
 }
+
 
 function wiltIndex(lives: number, max: number): number {
   const w = 1 - clamp(lives / Math.max(1, max), 0, 1);
@@ -1336,6 +1491,7 @@ function say(s: Sim, text: string, modal = false, hold = 7, who: Speaker = "john
 }
 
 function addFx(s: Sim, x: number, y: number, kind: Fx["kind"], c: string, r = 12, max = 0.35, ang = 0): void {
+  if (s.fx.length > 22) s.fx.splice(0, s.fx.length - 22);
   s.fx.push({ id: nid(s), x, y, t: max, max, kind, c, r, ang });
 }
 function addFloat(s: Sim, x: number, y: number, text: string, col: string): void {
@@ -1376,8 +1532,10 @@ function killEnemy(s: Sim, e: Enemy, from: Tower | null): void {
   if (e.hp > 0) return;
   e.hp = 0;
   s.cash += e.reward;
-  addFloat(s, e.x, e.y - 10, `+$${e.reward}`, "#e8c050");
-  addFx(s, e.x, e.y, "puff", e.kind === "mildew" ? "#e8e8d0" : "#6a4a28", e.r + 8, 0.35);
+  const pop = e.boss ? "WHAM!" : e.kind === "mildew" ? "POOF!" : e.kind === "gnat" ? "ZAP!" : (e.id % 2 ? "SPLAT!" : "BAM!");
+  addFloat(s, e.x, e.y - 18, pop, e.boss ? "#ffcc33" : "#ff3d6e");
+  addFloat(s, e.x + 8, e.y - 4, `+$${e.reward}`, "#ffe066");
+  addFx(s, e.x, e.y, "splat", e.kind === "mildew" ? "#f4f0d0" : "#ff4d6a", e.r + 16, 0.42);
   if (e.split) {
     for (let i = 0; i < e.split.n; i++) {
       const ch = spawnEnemy(s, e.split.id, Math.max(0, e.dist - 8 + i * 12));
@@ -1523,6 +1681,7 @@ function hurtWithStats(s: Sim, tw: Tower, st: TStats, e: Enemy, dmgMul = 1): voi
 }
 
 function fireTower(s: Sim, tw: Tower, st: TStats): void {
+  tw.anim = 0.32;
   if (tw.kind === "duster") {
     const nPlanes = st.targets >= 2 ? 2 : 1;
     for (let i = 0; i < nPlanes; i++) {
@@ -1549,7 +1708,7 @@ function fireTower(s: Sim, tw: Tower, st: TStats): void {
       if (!inCone(tw.x, tw.y, ang, st.cone, e.x, e.y)) continue;
       hurtWithStats(s, tw, st, e);
     }
-    addFx(s, tw.x + Math.cos(ang) * 18, tw.y + Math.sin(ang) * 18, "flash", "#a0c050", 16, 0.2, ang);
+    addFx(s, tw.x + Math.cos(ang) * 20, tw.y + Math.sin(ang) * 20, "spray", "#b6e05a", 22, 0.28, ang);
     return;
   }
   if (tw.kind === "uv" && tw.a >= 4 && Math.floor(s.time * 2) % 8 === 0) {
@@ -1570,7 +1729,7 @@ function fireTower(s: Sim, tw: Tower, st: TStats): void {
         dmg, pierce: st.pierce, splash: 0, life: 1.2, kind: "bullet", target: e.id, bounce: st.bounce, camoOk: st.camo, airOk: st.air,
         color: "#e8d080", r: 3,
       });
-      addFx(s, tw.x + Math.cos(ang) * 16, tw.y + Math.sin(ang) * 8, "flash", "#ffe8a0", 8, 0.12, ang);
+      addFx(s, tw.x + Math.cos(ang) * 18, tw.y + Math.sin(ang) * 18, "flash", "#fff3a0", 12, 0.14, ang);
     } else if (tw.kind === "mantis") {
       hurtWithStats(s, tw, st, e);
       addFx(s, e.x, e.y, "slash", "#b0d060", 16, 0.18, tw.lastAng);
@@ -1598,6 +1757,7 @@ function fireTower(s: Sim, tw: Tower, st: TStats): void {
       }
     } else {
       hurtWithStats(s, tw, st, e);
+      if (tw.kind === "ladybug") addFx(s, tw.x, tw.y, "bug", "#e23a2c", 10, 0.3, tw.lastAng);
     }
   }
 }
@@ -1762,7 +1922,7 @@ function updateEnemy(s: Sim, e: Enemy, dt: number): void {
 }
 
 function startWave(s: Sim): boolean {
-  if (s.waving || s.screen !== "play" || s.over) return false;
+  if (s.waving || s.screen !== "play" || s.over || s.cut) return false;
   const groups = waveGroups(s.wave);
   s.spawnQ = [];
   for (const g of groups) {
@@ -1816,7 +1976,11 @@ function applyStoryAfterWave(s: Sim): void {
   if (next === 40 && !s.revealed) {
     s.revealed = true;
     s.joeHere = true;
-    say(s, JOE_REVEAL, true, 99, "joe", "reveal");
+    s.johnHere = true;
+    s.cut = { kind: "betrayal", t: 0, phase: 0 };
+    s.john = null;
+    s.selected = null;
+    s.placing = null;
     return;
   }
   s.joeHere = joeHereAt(next, s.revealed, s.won40, false);
@@ -1824,8 +1988,50 @@ function applyStoryAfterWave(s: Sim): void {
   if (beat && !s.john?.modal) say(s, beat.text, false, 7.5, beat.who);
 }
 
+function actFor(who: "john" | "joe", s: Sim): FarmAct {
+  const j = s.john;
+  if (who === "joe") {
+    if (s.cut?.kind === "betrayal" && s.cut.phase >= 1) return (s.cut.t % 2.6 < 1.0 && s.cut.phase === 1) ? "sip" : "mean";
+    if (j?.who === "joe") return (s.time % 2.8 < 1.05) ? "sip" : "talk";
+    return "idle";
+  }
+  if (j?.who === "john") {
+    if (j.beat === "johnReact" || s.cut?.phase === 2) return "hat";
+    if (j.beat === "intro") return (s.time % 3.2 < 1.15) ? "hat" : "talk";
+    return "talk";
+  }
+  return "idle";
+}
+
+function skipCutscene(s: Sim): void {
+  if (!s.cut) return;
+  if (s.cut.phase === 0) {
+    s.cut.phase = 1;
+    s.cut.t = 0;
+    say(s, JOE_REVEAL, true, 99, "joe", "reveal");
+  } else if (s.cut.phase === 1) {
+    s.cut.phase = 2;
+    s.cut.t = 0;
+    say(s, JOHN_ON_REVEAL, true, 99, "john", "johnReact");
+  } else {
+    s.cut = null;
+    s.john = null;
+    s.joeHere = joeHereAt(s.wave, s.revealed, s.won40, false);
+  }
+}
+
 function step(s: Sim, dt: number): void {
   if (s.screen !== "play" || s.over) return;
+  if (s.cut) {
+    const t = Math.min(0.05, dt);
+    s.time += t;
+    s.cut.t += t;
+    if (s.cut.phase === 0 && s.cut.t >= 2.8) {
+      s.cut.phase = 1;
+      say(s, JOE_REVEAL, true, 99, "joe", "reveal");
+    }
+    return;
+  }
   const t = Math.min(0.05, dt) * s.speed;
   s.time += t;
   s.shake = Math.max(0, s.shake - t);
@@ -1846,6 +2052,7 @@ function step(s: Sim, dt: number): void {
   s.enemies = s.enemies.filter((e) => e.hp > 0);
   for (const tw of s.towers.slice()) {
     const st = statsFor(tw.kind, tw.a, tw.b);
+    if (tw.anim) tw.anim = Math.max(0, (tw.anim || 0) - t);
     if (tw.kind === "sticky") { updateSticky(s, tw, st, t); continue; }
     tw.cd -= t;
     if (tw.cd <= 0) {
@@ -1865,13 +2072,17 @@ function step(s: Sim, dt: number): void {
   }
 }
 
+function isFreeStarter(s: Sim, kind: TowerId): boolean { return !s.freeUsed && kind === "ladybug"; }
+
 function placeTower(s: Sim, kind: TowerId, x: number, y: number): Tower | null {
   if (!canPlaceAt(s, kind, x, y)) return null;
   const def = TDEF[kind];
-  if (s.cash < def.cost) return null;
+  const free = isFreeStarter(s, kind);
+  if (!free && s.cash < def.cost) return null;
   const st = statsFor(kind, 0, 0);
-  const tw: Tower = { id: nid(s), kind, x, y, a: 0, b: 0, tgt: "first", cd: 0.3, charges: st.charges, spent: def.cost, lastAng: 0 };
-  s.cash -= def.cost;
+  const tw: Tower = { id: nid(s), kind, x, y, a: 0, b: 0, tgt: "first", cd: 0.3, charges: st.charges, spent: free ? 0 : def.cost, lastAng: 0, anim: 0 };
+  if (free) s.freeUsed = true;
+  else s.cash -= def.cost;
   s.towers.push(tw);
   s.selected = tw.id;
   s.placing = null;
@@ -1912,7 +2123,7 @@ function freshSim(): Sim {
     speed: 1, towers: [], enemies: [], shots: [], planes: [], floats: [], fx: [], spawnQ: [], waveT: 0,
     selected: null, placing: null, hover: null, john: null, intro: true, won40: false, time: 0, uid: 1,
     seen: [], dirty: false, over: false, pendingEnd: 0, shake: 0,
-    revealed: false, joeHere: true, johnHere: true,
+    revealed: false, joeHere: true, johnHere: true, freeUsed: false, cut: null,
   };
   say(s, JOHN_INTRO, true, 99, "john", "intro");
   return s;
@@ -1938,10 +2149,13 @@ function applySave(d: SaveData): Sim {
     const st = statsFor(t.kind, t.a || 0, t.b || 0);
     s.towers.push({
       id: nid(s), kind: t.kind, x: t.x, y: t.y, a: clamp(t.a || 0, 0, 4), b: clamp(t.b || 0, 0, 4),
-      tgt: TARGETS.indexOf(t.tgt) >= 0 ? t.tgt : "first", cd: 0.2, charges: t.charges ?? st.charges, spent: t.spent || TDEF[t.kind].cost, lastAng: 0,
+      tgt: TARGETS.indexOf(t.tgt) >= 0 ? t.tgt : "first", cd: 0.2, charges: t.charges ?? st.charges, spent: typeof t.spent === "number" ? Math.max(0, t.spent) : TDEF[t.kind].cost, lastAng: 0, anim: 0,
     });
   }
   if (s.lives <= 0) { s.lives = 1; }
+  s.cut = null;
+  if (d.freeUsed !== undefined) s.freeUsed = !!d.freeUsed;
+  else s.freeUsed = d.towers.length > 0 || d.cash > 0 || d.wave > 1;
   s.screen = "play";
   return s;
 }
@@ -1967,71 +2181,77 @@ function drawFrame(c: CanvasRenderingContext2D, s: Sim, cssW: number, cssH: numb
   const shx = (s.shake ? (Math.random() - 0.5) * 10 * s.shake : 0);
   const shy = (s.shake ? (Math.random() - 0.5) * 8 * s.shake : 0);
   c.setTransform(dpr * scale, 0, 0, dpr * scale, dpr * (ox + shx), dpr * (oy + shy));
+  c.imageSmoothingEnabled = false;
   if (SPR.farm) c.drawImage(SPR.farm, 0, 0);
+  // a handful of live swaying tufts (cheap); the field itself is prerendered
+  drawCropTuft(c, 200, 330, s.time * 2.2, "#4cd05a");
+  drawCropTuft(c, 360, 480, s.time * 2.2 + 1, "#2f9a32");
+  drawCropTuft(c, 700, 300, s.time * 2.2 + 2, "#7ae048");
+  drawCropTuft(c, 820, 620, s.time * 2.2 + 0.6, "#4cd05a");
+  drawCropTuft(c, 140, 700, s.time * 2.2 + 1.4, "#2f9a32");
+  drawWindmillBlades(c, s.time);
+  drawPondShimmer(c, s.time);
+  drawClouds(c, s.time);
+  if (s.cut && s.cut.kind === "betrayal") drawBetrayalSwarm(c, s.cut.t + (s.cut.phase > 0 ? 2.8 : 0));
   // plant
-  const wi = wiltIndex(s.lives, s.maxLives);
-  const pc = SPR.plant[wi];
-  if (pc) c.drawImage(pc, PLANT.x - 100, PLANT.y - 170, 200, 225);
-  // hired help on the farm
+  const wilt = 1 - clamp(s.lives / Math.max(1, s.maxLives), 0, 1);
+  const pfr = SPR.plant[clamp(Math.floor(wilt * 4.999), 0, 4)];
+  c.save();
+  c.translate(PLANT.x, PLANT.y);
+  c.rotate(Math.sin(s.time * 1.6) * 0.14 * (1 - wilt * 0.45));
+  if (pfr) c.drawImage(pfr, -70, -70);
+  else drawPlant(c, wilt, s.time);
+  c.restore();
+  // hired help
   if (s.johnHere && !(s.revealed && s.waving && s.wave >= 40)) {
-    c.save(); c.translate(JOHN_SPOT.x, JOHN_SPOT.y); drawFarmhand(c, "john", s.time); c.restore();
+    c.save(); c.translate(JOHN_SPOT.x, JOHN_SPOT.y); drawFarmhand(c, "john", s.time, actFor("john", s)); c.restore();
   }
-  if (s.joeHere && !s.waving) {
-    c.save(); c.translate(JOE_SPOT.x, JOE_SPOT.y); drawFarmhand(c, "joe", s.time + 1); c.restore();
+  if (s.joeHere && (!s.waving || !!s.cut)) {
+    c.save(); c.translate(JOE_SPOT.x, JOE_SPOT.y); drawFarmhand(c, "joe", s.time + 1, actFor("joe", s)); c.restore();
   } else if (!s.revealed && !s.won40 && joeAwayFor(s.wave)) {
-    // empty usual spot — a worn patch so the absence reads
     c.fillStyle = "rgba(90,70,40,0.35)"; ellipse(c, JOE_SPOT.x, JOE_SPOT.y + 14, 14, 5); c.fill();
   }
-  // detect auras
   for (const tw of s.towers) {
     if (tw.kind !== "uv") continue;
     const st = statsFor(tw.kind, tw.a, tw.b);
     c.beginPath(); c.arc(tw.x, tw.y, st.range, 0, Math.PI * 2);
     c.fillStyle = "rgba(140,120,255,0.05)"; c.fill();
   }
-  // sticky first (on path)
   for (const tw of s.towers) {
-    if (tw.kind !== "sticky") continue;
-    c.save(); c.translate(tw.x, tw.y);
-    drawStickyTower(c, tw.a, tw.b);
-    c.restore();
-    if (s.selected === tw.id) {
-      const st = statsFor(tw.kind, tw.a, tw.b);
-      drawRange(c, tw.x, tw.y, st.range, true);
-    }
-  }
-  // other towers
-  for (const tw of s.towers) {
-    if (tw.kind === "sticky") continue;
-    c.save(); c.translate(tw.x, tw.y);
-    drawTowerSprite(c, tw.kind, tw.a, tw.b);
+    c.save();
+    const bob = Math.sin(s.time * 3.2 + tw.x * 0.04) * 1.4;
+    const punch = tw.anim || 0;
+    c.translate(tw.x, tw.y + bob);
+    if (punch > 0) c.scale(1 + punch * 0.12, 1 - punch * 0.08);
+    drawTowerSprite(c, tw.kind, tw.a, tw.b, s.time, punch, tw.lastAng);
     c.restore();
     if (s.selected === tw.id) drawRange(c, tw.x, tw.y, statsFor(tw.kind, tw.a, tw.b).range, true);
   }
-  // placement ghost
   if (s.placing && s.hover) {
     const st = statsFor(s.placing, 0, 0);
-    const ok = canPlaceAt(s, s.placing, s.hover.x, s.hover.y) && s.cash >= TDEF[s.placing].cost;
+    const ok = canPlaceAt(s, s.placing, s.hover.x, s.hover.y) && (isFreeStarter(s, s.placing) || s.cash >= TDEF[s.placing].cost);
     drawRange(c, s.hover.x, s.hover.y, st.range, ok);
-    c.globalAlpha = 0.85;
+    c.globalAlpha = ok ? 0.85 : 0.45;
     c.save(); c.translate(s.hover.x, s.hover.y);
-    if (!ok) c.globalAlpha = 0.45;
-    drawTowerSprite(c, s.placing, 0, 0);
+    drawTowerSprite(c, s.placing, 0, 0, s.time, 0, 0);
     c.restore();
     c.globalAlpha = 1;
   }
-  // enemies (ground then air)
-  const ordered = s.enemies.slice().sort((a, b) => (a.flying === b.flying ? 0 : a.flying ? 1 : -1));
-  for (const e of ordered) {
+  for (const pass of [false, true]) {
+  for (const e of s.enemies) {
+    if (e.flying !== pass) continue;
     if (e.camo) c.globalAlpha = 0.55;
     c.save();
     c.translate(e.x, e.y);
-    c.rotate(e.flying ? Math.sin(s.time * 6) * 0.1 : e.ang * 0.15);
-    drawEnemySprite(c, e.kind, s.time + e.id, e.hitT > 0);
-    if (e.hitT > 0) { c.fillStyle = "rgba(255,255,255,0.35)"; ellipse(c, 0, 0, e.r + 2, e.r); c.fill(); }
+    c.rotate(e.ang);
+    if (e.flying) c.translate(0, Math.sin(s.time * 10 + e.id) * -3);
+    const frames = SPR.enemy[e.kind];
+    const fr = frames ? frames[Math.floor(s.time * 8 + e.id) % frames.length] : null;
+    if (fr) c.drawImage(fr, -36, -36);
+    else drawEnemySprite(c, e.kind, s.time + e.id * 0.2, e.hitT > 0);
     c.restore();
+    if (e.hitT > 0) { c.fillStyle = "rgba(255,255,255,0.4)"; ellipse(c, e.x, e.y, e.r + 3, e.r + 2); c.fill(); }
     c.globalAlpha = 1;
-    // hp bar for wounded / bosses
     if (e.hp < e.max || e.boss) {
       const w = Math.max(16, e.r * 2.2), h = e.boss ? 5 : 3;
       c.fillStyle = "rgba(0,0,0,0.55)"; c.fillRect(e.x - w / 2, e.y - e.r - 10, w, h);
@@ -2039,7 +2259,7 @@ function drawFrame(c: CanvasRenderingContext2D, s: Sim, cssW: number, cssH: numb
       c.fillRect(e.x - w / 2, e.y - e.r - 10, w * clamp(e.hp / e.max, 0, 1), h);
     }
   }
-  // shots
+  }
   for (const sh of s.shots) {
     if (sh.kind === "beam") {
       const tgt = s.enemies.find((e) => e.id === sh.target);
@@ -2065,6 +2285,21 @@ function drawFrame(c: CanvasRenderingContext2D, s: Sim, cssW: number, cssH: numb
     } else if (f.kind === "slash") {
       c.strokeStyle = f.c; c.lineWidth = 3; c.beginPath();
       c.arc(f.x, f.y, f.r, (f.ang ?? 0) - 0.8, (f.ang ?? 0) + 0.8); c.stroke();
+    } else if (f.kind === "splat") {
+      c.fillStyle = f.c;
+      c.beginPath(); c.arc(f.x, f.y, f.r * (0.5 + k * 0.6), 0, Math.PI * 2); c.fill();
+      c.beginPath(); c.arc(f.x + f.r * k * 0.6, f.y - f.r * k * 0.3, 4, 0, Math.PI * 2); c.fill();
+      c.beginPath(); c.arc(f.x - f.r * k * 0.5, f.y + f.r * k * 0.2, 3, 0, Math.PI * 2); c.fill();
+    } else if (f.kind === "spray") {
+      const ang = f.ang ?? 0;
+      c.save(); c.translate(f.x, f.y); c.rotate(ang);
+      c.fillStyle = f.c; c.globalAlpha = (1 - k) * 0.5;
+      ellipse(c, 12 + k * 20, 0, 14 + k * 16, 8 + k * 8); c.fill();
+      c.restore();
+    } else if (f.kind === "bug") {
+      const ang = f.ang ?? 0;
+      const d = k * 28;
+      disc(c, f.x + Math.cos(ang) * d, f.y + Math.sin(ang) * d, 5, "#e23a2c", 2);
     } else {
       c.fillStyle = f.c; c.fillRect(f.x - 1, f.y - 1, 2, 2);
     }
@@ -2073,7 +2308,8 @@ function drawFrame(c: CanvasRenderingContext2D, s: Sim, cssW: number, cssH: numb
   for (const f of s.floats) {
     const k = 1 - f.t / f.max;
     c.globalAlpha = 1 - k;
-    c.fillStyle = f.c; c.font = "bold 13px Georgia, serif"; c.textAlign = "center"; c.textBaseline = "middle";
+    const bang = f.text.charCodeAt(f.text.length - 1) === 33;
+    c.fillStyle = f.c; c.font = bang ? "bold 18px Georgia, serif" : "bold 13px Georgia, serif"; c.textAlign = "center"; c.textBaseline = "middle";
     c.strokeStyle = "rgba(0,0,0,0.55)"; c.lineWidth = 3;
     c.strokeText(f.text, f.x, f.y - k * 22);
     c.fillText(f.text, f.x, f.y - k * 22);
@@ -2095,13 +2331,13 @@ type Hud = {
   screen: Screen; cash: number; lives: number; maxLives: number; wave: number; waving: boolean; speed: number;
   placing: TowerId | null; selected: number | null; john: JohnMsg | null; intro: boolean; won40: boolean;
   over: boolean; toast: string; exitAsk: boolean; saveOpen: boolean; confirmNew: boolean; hasSave: boolean;
-  codeMsg: string; showingHelp: boolean;
+  codeMsg: string; showingHelp: boolean; freeUsed: boolean; cut: Cutscene | null;
 };
 
 const INIT_HUD: Hud = {
   screen: "title", cash: 0, lives: 0, maxLives: START_LIVES, wave: 1, waving: false, speed: 1,
   placing: null, selected: null, john: null, intro: false, won40: false, over: false, toast: "",
-  exitAsk: false, saveOpen: false, confirmNew: false, hasSave: false, codeMsg: "", showingHelp: false,
+  exitAsk: false, saveOpen: false, confirmNew: false, hasSave: false, codeMsg: "", showingHelp: false, freeUsed: false, cut: null,
 };
 
 function snapHud(s: Sim | null, extra: Partial<Hud> = {}): Hud {
@@ -2111,7 +2347,7 @@ function snapHud(s: Sim | null, extra: Partial<Hud> = {}): Hud {
     ...base,
     screen: extra.showingHelp ? "help" : s.screen, cash: s.cash, lives: s.lives, maxLives: s.maxLives, wave: s.wave, waving: s.waving,
     speed: s.speed, placing: s.placing, selected: s.selected, john: s.john, intro: s.intro, won40: s.won40, over: s.over,
-    showingHelp: extra.showingHelp === true,
+    showingHelp: extra.showingHelp === true, freeUsed: s.freeUsed, cut: s.cut,
   };
 }
 
@@ -2205,14 +2441,14 @@ export default function CowboyJohnsCropDefense() {
         if (s.screen === "play") step(s, dt);
         if (cv) {
           const r = cv.getBoundingClientRect();
-          const dpr = Math.min(2, window.devicePixelRatio || 1);
+          const dpr = Math.min(1.5, window.devicePixelRatio || 1);
           const w = Math.max(1, r.width), h = Math.max(1, r.height);
           if (cv.width !== Math.floor(w * dpr) || cv.height !== Math.floor(h * dpr)) { cv.width = Math.floor(w * dpr); cv.height = Math.floor(h * dpr); }
           const ctx = cv.getContext("2d");
           if (ctx) view.current = drawFrame(ctx, s, w, h, dpr);
         }
         const h = hudRef.current;
-        const need = h.cash !== s.cash || h.lives !== s.lives || h.wave !== s.wave || h.waving !== s.waving || h.screen !== s.screen || h.selected !== s.selected || h.placing !== s.placing || (h.john?.text !== s.john?.text) || h.speed !== s.speed;
+        const need = h.cash !== s.cash || h.lives !== s.lives || h.wave !== s.wave || h.waving !== s.waving || h.screen !== s.screen || h.selected !== s.selected || h.placing !== s.placing || (h.john?.text !== s.john?.text) || h.speed !== s.speed || h.freeUsed !== s.freeUsed || (h.cut?.phase !== s.cut?.phase);
         if (need) {
           const urgent = h.screen !== s.screen || h.selected !== s.selected || h.placing !== s.placing || h.waving !== s.waving || (h.john?.text !== s.john?.text);
           const nowB = now;
@@ -2223,7 +2459,7 @@ export default function CowboyJohnsCropDefense() {
         }
       } else if (cv) {
         const r = cv.getBoundingClientRect();
-        const dpr = Math.min(2, window.devicePixelRatio || 1);
+        const dpr = Math.min(1.5, window.devicePixelRatio || 1);
         const w = Math.max(1, r.width), h = Math.max(1, r.height);
         if (cv.width !== Math.floor(w * dpr) || cv.height !== Math.floor(h * dpr)) { cv.width = Math.floor(w * dpr); cv.height = Math.floor(h * dpr); }
         const ctx = cv.getContext("2d");
@@ -2234,17 +2470,27 @@ export default function CowboyJohnsCropDefense() {
         }
       }
       const jc = johnCv.current;
-      if (jc && SPR.john) {
-        const dpr = Math.min(2, window.devicePixelRatio || 1);
+      if (jc) {
+        const dpr = Math.min(1.5, window.devicePixelRatio || 1);
         const r = jc.getBoundingClientRect();
-        if (jc.width !== Math.floor(r.width * dpr) || jc.height !== Math.floor(r.height * dpr)) { jc.width = Math.floor(r.width * dpr); jc.height = Math.floor(r.height * dpr); }
+        const cw = Math.max(1, r.width), ch = Math.max(1, r.height);
+        if (jc.width !== Math.floor(cw * dpr) || jc.height !== Math.floor(ch * dpr)) { jc.width = Math.floor(cw * dpr); jc.height = Math.floor(ch * dpr); }
         const jx = jc.getContext("2d");
         if (jx) {
-          jx.setTransform(1, 0, 0, 1, 0, 0); jx.clearRect(0, 0, jc.width, jc.height);
-          const who = sim.current?.john?.who;
-          const beat = sim.current?.john?.beat;
-          const pic = who === "joe" ? ((beat === "reveal" || sim.current?.revealed) && beat === "reveal" ? SPR.joeMean : SPR.joe) : SPR.john;
-          if (pic) jx.drawImage(pic, 0, 0, jc.width, jc.height);
+          jx.setTransform(dpr, 0, 0, dpr, 0, 0); jx.clearRect(0, 0, cw, ch);
+          const s0 = sim.current;
+          const who = s0?.john?.who ?? "john";
+          const beat = s0?.john?.beat;
+          const time = s0 ? s0.time : now / 1000;
+          const talk = !!s0?.john && s0.john.who === who && who !== "narrator";
+          if (who === "joe") {
+            const mean = beat === "reveal" || (s0?.revealed === true && (s0.cut?.phase ?? 0) >= 1);
+            const sip = talk && ((time % 2.8) < 1.05);
+            drawJoePortrait(jx, cw, ch, mean, time, talk, sip);
+          } else {
+            const hat = talk && (beat === "intro" || beat === "johnReact" || (s0?.cut?.phase === 2) || (time % 3.2) < 1.15);
+            drawJohnPortrait(jx, cw, ch, time, talk, hat);
+          }
         }
       }
     };
@@ -2289,6 +2535,7 @@ export default function CowboyJohnsCropDefense() {
     ev.preventDefault();
     const p = worldFromEvent(el, ev, view.current);
     if (kind === "move" || kind === "down") s.hover = p;
+    if (s.cut) { if (kind === "up") { skipCutscene(s); bump(); } return; }
     if (kind !== "up") { if (kind === "move" && s.placing) bump(); return; }
     if (s.placing) {
       const tw = placeTower(s, s.placing, p.x, p.y);
@@ -2318,6 +2565,7 @@ export default function CowboyJohnsCropDefense() {
       if (e.key === "Escape") {
         e.preventDefault();
         if (!s || h.screen === "title" || h.screen === "help") { bump({ exitAsk: true }); return; }
+        if (s.cut) { skipCutscene(s); bump(); return; }
         if (s.placing) { s.placing = null; bump(); return; }
         if (s.selected !== null) { s.selected = null; bump(); return; }
         if (s.john?.modal) { s.john = null; s.intro = false; bump(); return; }
@@ -2327,6 +2575,10 @@ export default function CowboyJohnsCropDefense() {
       }
       if (!s || s.screen !== "play") {
         if ((e.key === " " || e.key === "Enter") && s && s.screen === "victory") { s.screen = "play"; bump(); e.preventDefault(); }
+        return;
+      }
+      if (s.cut) {
+        if (e.key === " " || e.key === "Enter") { skipCutscene(s); bump(); e.preventDefault(); }
         return;
       }
       if (s.john?.modal) {
@@ -2386,12 +2638,14 @@ export default function CowboyJohnsCropDefense() {
       selectNear: (x: number, y: number) => boolean;
       spawn: (id: string, n: number, dist0?: number) => number;
       setWave: (n: number) => void;
+      skipCut: () => void;
+      playBetrayal: (phase?: number) => void;
     };
     const api: Api = {
       get: () => {
         const s = sim.current;
         if (!s) return { screen: hudRef.current.screen, hasSave: !!loadSaved() };
-        return { screen: s.screen, cash: s.cash, lives: s.lives, wave: s.wave, waving: s.waving, towers: s.towers.length, enemies: s.enemies.length, speed: s.speed, selected: s.selected, placing: s.placing, won40: s.won40, intro: !!s.john?.modal };
+        return { screen: s.screen, cash: s.cash, lives: s.lives, wave: s.wave, waving: s.waving, towers: s.towers.length, enemies: s.enemies.length, speed: s.speed, selected: s.selected, placing: s.placing, won40: s.won40, intro: !!s.john?.modal, freeUsed: s.freeUsed, cut: s.cut ? s.cut.phase : null, revealed: s.revealed, who: s.john?.who ?? null, beat: s.john?.beat ?? null };
       },
       cash: (n: number) => { const s = sim.current; if (s) { s.cash = n; bump(); } },
       lives: (n: number) => { const s = sim.current; if (s) { s.lives = n; bump(); } },
@@ -2426,6 +2680,18 @@ export default function CowboyJohnsCropDefense() {
         let best: Tower | null = null, bd = 40;
         for (const tw of s.towers) { const dd = dist(x, y, tw.x, tw.y); if (dd < bd) { bd = dd; best = tw; } }
         s.selected = best ? best.id : null; bump(); return !!best;
+      },
+      skipCut: () => { const s = sim.current; if (s) { skipCutscene(s); bump(); } },
+      playBetrayal: (phase?: number) => {
+        const s = sim.current; if (!s) return;
+        s.revealed = true; s.wave = 40; s.waving = false; s.intro = false; s.enemies = []; s.spawnQ = [];
+        s.joeHere = true; s.johnHere = true; s.selected = null; s.placing = null;
+        const ph = (phase === 1 || phase === 2) ? phase : 0;
+        s.cut = { kind: "betrayal", t: ph === 0 ? 1.2 : 0.6, phase: ph };
+        if (ph === 1) say(s, JOE_REVEAL, true, 99, "joe", "reveal");
+        else if (ph === 2) say(s, JOHN_ON_REVEAL, true, 99, "john", "johnReact");
+        else s.john = null;
+        bump();
       },
     };
     (window as unknown as { __CJCD: Api }).__CJCD = api;
@@ -2469,7 +2735,8 @@ export default function CowboyJohnsCropDefense() {
   } as CSSProperties;
 
   const shopBtn = (d: TowerDef): JSX.Element => {
-    const afford = hud.cash >= d.cost;
+    const isFree = !hud.freeUsed && d.id === "ladybug";
+    const afford = isFree || hud.cash >= d.cost;
     const on = hud.placing === d.id;
     return (
       <button type="button" key={d.id} data-testid={`shop-${d.id}`} onClick={() => {
@@ -2486,7 +2753,7 @@ export default function CowboyJohnsCropDefense() {
           <ShopIcon kind={d.id} />
         </div>
         <div style={{ fontSize: 10, fontWeight: 800, lineHeight: 1.15, marginTop: 2 }}>{d.short}</div>
-        <div style={{ fontSize: 11, fontWeight: 700, color: afford ? t.text.warning : t.text.danger }}>${d.cost}</div>
+        <div style={{ fontSize: 11, fontWeight: 700, color: isFree ? t.text.success : afford ? t.text.warning : t.text.danger }}>{isFree ? "FREE" : `$${d.cost}`}</div>
         <div style={{ fontSize: 9, color: t.text.tertiary }}>{d.key}</div>
       </button>
     );
@@ -2500,12 +2767,12 @@ export default function CowboyJohnsCropDefense() {
       <div style={{ fontWeight: 800, fontSize: 16, color: hud.lives < 30 ? t.text.danger : t.text.success }} data-testid="lives">🌿 {hud.lives}/{hud.maxLives}</div>
       <div style={{ fontWeight: 700, fontSize: 14, color: t.text.secondary, flex: 1 }} data-testid="wave">Wave {hud.wave}{hud.wave > MAX_WAVE ? " · Freeplay" : ""}{hud.waving ? " · INCOMING" : ""}</div>
       {btn(hud.speed === 1 ? "2×" : "1×", () => { const s = sim.current; if (s) { s.speed = s.speed === 1 ? 2 : 1; bump(); } }, { test: "speed", small: true })}
-      {btn(hud.waving ? "Wave running" : "Start Wave", () => { const s = sim.current; if (s && s.screen === "play") { startWave(s); bump(); } }, { tone: "pri", test: "start-wave", disabled: hud.waving || hud.screen !== "play", small: true })}
+      {btn(hud.waving ? "Wave running" : "Start Wave", () => { const s = sim.current; if (s && s.screen === "play") { startWave(s); bump(); } }, { tone: "pri", test: "start-wave", disabled: hud.waving || hud.screen !== "play" || !!hud.cut, small: true })}
       {btn("Menu", () => { const s = sim.current; if (s && (s.screen === "play" || s.screen === "paused")) { s.screen = s.screen === "paused" ? "play" : "paused"; bump(); } }, { test: "menu", small: true })}
     </div>
   ) : null;
 
-  const selPanel = sel && playHud && hud.screen === "play" ? (
+  const selPanel = sel && playHud && hud.screen === "play" && !hud.cut ? (
     <div data-testid="upgrade-panel" style={{ background: t.bg.elevated, border: `1px solid ${t.border.default}`, borderRadius: 14, padding: 10, marginTop: 6 }}>
       <div style={{ display: "flex", gap: 6, alignItems: "center", marginBottom: 6, flexWrap: "wrap" }}>
         <div style={{ fontWeight: 800, flex: 1, fontSize: 14 }}>{TDEF[sel.kind].name}  {sel.a}/{sel.b}</div>
@@ -2538,13 +2805,13 @@ export default function CowboyJohnsCropDefense() {
     </div>
   ) : null;
 
-  const shop = playHud && hud.screen === "play" ? (
+  const shop = playHud && hud.screen === "play" && !hud.cut ? (
     <div data-testid="shop" style={{ display: "flex", flexDirection: land ? "column" : "row", gap: 6, overflowX: land ? "hidden" : "auto", overflowY: land ? "auto" : "hidden", maxHeight: land ? "100%" : undefined, paddingBottom: 2 }}>
       {TOWERS.map(shopBtn)}
     </div>
   ) : null;
 
-  const johnBanner = hud.john && !hud.john.modal && playHud ? (
+  const johnBanner = hud.john && !hud.john.modal && playHud && !hud.cut ? (
     <div data-testid="john-tip" onClick={() => { const s = sim.current; if (s) s.john = null; bump(); }} style={{ display: "flex", gap: 8, alignItems: "center", background: t.bg.elevated, border: `1px solid ${t.border.default}`, borderRadius: 12, padding: 8, marginTop: 6, cursor: "pointer" }}>
       <canvas ref={johnCv} width={80} height={90} style={{ width: 48, height: 54, borderRadius: 8, flex: "0 0 auto", background: t.bg.subtle }} />
       <div style={{ fontSize: 13, lineHeight: 1.35, flex: 1, fontStyle: hud.john.who === "narrator" ? "italic" : "normal" }}>{hud.john.who === "narrator" ? null : <b style={{ color: hud.john.who === "joe" ? "#c4d080" : t.text.accent }}>{hud.john.who === "joe" ? "Joe: " : "Cowboy John: "}</b>}{hud.john.text}</div>
@@ -2579,7 +2846,7 @@ export default function CowboyJohnsCropDefense() {
         </Modal>
       );
     }
-    if (hud.john?.modal && playHud) {
+    if (hud.john?.modal && playHud && !hud.cut) {
       return (
         <Modal title={hud.john?.who === "joe" ? (hud.john?.beat === "reveal" ? "Joe" : "Joe") : "Cowboy John"} test={hud.john?.beat === "reveal" ? "joe-reveal" : hud.john?.beat === "joeHello" ? "joe-hello" : "john-intro"}>
           <div style={{ display: "flex", gap: 12, alignItems: "flex-start" }}>
@@ -2714,6 +2981,24 @@ export default function CowboyJohnsCropDefense() {
                 onPointerCancel={() => { const s = sim.current; if (s) s.hover = null; }}
                 onContextMenu={(e) => e.preventDefault()}
               />
+              {hud.cut && (
+                <div data-testid={hud.cut.phase === 0 ? "betrayal-cut" : (hud.john?.beat === "reveal" ? "joe-reveal" : "john-react")}
+                  onClick={() => { const s = sim.current; if (s) { skipCutscene(s); bump(); } }}
+                  style={{ position: "absolute", left: 8, right: 8, bottom: 8, zIndex: 6, display: "flex", flexDirection: "column", alignItems: "center", gap: 6, cursor: "pointer" }}>
+                  <div style={{ background: "rgba(20,12,4,0.78)", color: "#f3e6c8", padding: "4px 12px", borderRadius: 999, fontSize: 12, fontWeight: 800, border: "1px solid #8a6238" }}>Tap to skip</div>
+                  {hud.cut.phase > 0 && hud.john ? (
+                    <div style={{ width: "100%", background: "rgba(42,30,18,0.94)", border: "1px solid #8a6238", borderRadius: 14, padding: 10, display: "flex", gap: 10, boxShadow: "0 10px 28px rgba(0,0,0,0.45)" }}>
+                      <canvas ref={johnCv} width={160} height={180} style={{ width: 72, height: 82, borderRadius: 10, flex: "0 0 auto", background: t.bg.subtle }} />
+                      <div style={{ flex: 1, minWidth: 0 }}>
+                        <div style={{ fontWeight: 800, fontSize: 16, color: "#f3e6c8", fontFamily: "Georgia, serif", marginBottom: 4 }}>{hud.john.who === "joe" ? "Joe" : "Cowboy John"}</div>
+                        <div style={{ fontSize: 13, lineHeight: 1.4, color: "#f3e6c8" }}>{hud.john.text}</div>
+                      </div>
+                    </div>
+                  ) : (
+                    <div style={{ width: "100%", background: "rgba(42,30,18,0.92)", border: "1px solid #8a6238", borderRadius: 14, padding: 10, color: "#f3e6c8", fontSize: 14, fontWeight: 700, textAlign: "center" }}>A swarm is pouring over the hillside...</div>
+                  )}
+                </div>
+              )}
             </div>
             {johnBanner}
             {!land && selPanel}
@@ -2751,7 +3036,7 @@ function ShopIcon({ kind }: { kind: TowerId }): JSX.Element {
   const ref = useRef<HTMLCanvasElement>(null);
   useEffect(() => {
     const el = ref.current; if (!el) return;
-    const dpr = Math.min(2, window.devicePixelRatio || 1);
+    const dpr = Math.min(1.5, window.devicePixelRatio || 1);
     el.width = 48 * dpr; el.height = 36 * dpr;
     const c = el.getContext("2d"); if (!c) return;
     c.setTransform(dpr, 0, 0, dpr, 0, 0);
