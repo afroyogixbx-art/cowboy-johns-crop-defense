@@ -3047,14 +3047,14 @@ function worldFromEvent(el: HTMLCanvasElement, ev: { clientX: number; clientY: n
 type Hud = {
   screen: Screen; cash: number; lives: number; maxLives: number; wave: number; waving: boolean; speed: number;
   placing: TowerId | null; selected: number | null; john: JohnMsg | null; intro: boolean; won40: boolean;
-  over: boolean; toast: string; exitAsk: boolean; saveOpen: boolean; confirmNew: boolean; hasSave: boolean;
+  over: boolean; toast: string; exitAsk: boolean; exitScreen: boolean; saveOpen: boolean; confirmNew: boolean; hasSave: boolean;
   codeMsg: string; showingHelp: boolean; freeUsed: boolean; cut: Cutscene | null;
 };
 
 const INIT_HUD: Hud = {
   screen: "title", cash: 0, lives: 0, maxLives: START_LIVES, wave: 1, waving: false, speed: 1,
   placing: null, selected: null, john: null, intro: false, won40: false, over: false, toast: "",
-  exitAsk: false, saveOpen: false, confirmNew: false, hasSave: false, codeMsg: "", showingHelp: false, freeUsed: false, cut: null,
+  exitAsk: false, exitScreen: false, saveOpen: false, confirmNew: false, hasSave: false, codeMsg: "", showingHelp: false, freeUsed: false, cut: null,
 };
 
 function snapHud(s: Sim | null, extra: Partial<Hud> = {}): Hud {
@@ -3092,6 +3092,23 @@ function copyCode(text: string, done: (ok: boolean) => void): void {
 let LEAVING = false;
 let TRAP_OK = false;
 function trapBack(): void { try { window.history.pushState({ cjcdTrap: Date.now() }, ""); TRAP_OK = true; } catch { TRAP_OK = false; } }
+function isStandalonePwa(): boolean {
+  try { if (window.matchMedia && window.matchMedia("(display-mode: standalone)").matches) return true; } catch { /* ignore */ }
+  const nav = window.navigator as Navigator & { standalone?: boolean };
+  return nav.standalone === true;
+}
+function tryCloseShell(): void {
+  try { window.close(); } catch { /* ignore */ }
+  const nav = window.navigator as Navigator & { standalone?: boolean; app?: { exitApp?: () => void } };
+  const android = /Android/i.test(nav.userAgent || "");
+  if (isStandalonePwa() && android) {
+    try { nav.app?.exitApp?.(); } catch { /* ignore */ }
+    try {
+      const n = window.history.length - 1;
+      if (n > 0) window.history.go(-n);
+    } catch { /* ignore */ }
+  }
+}
 
 export default function CowboyJohnsCropDefense() {
   const theme = useGrokTheme();
@@ -3105,7 +3122,7 @@ export default function CowboyJohnsCropDefense() {
   const hudRef = useRef(hud);
   hudRef.current = hud;
   const bump = useCallback((extra: Partial<Hud> = {}): void => {
-    setHud((h) => snapHud(sim.current, { ...h, toast: extra.toast ?? h.toast, exitAsk: extra.exitAsk ?? h.exitAsk, saveOpen: extra.saveOpen ?? h.saveOpen, confirmNew: extra.confirmNew ?? h.confirmNew, codeMsg: extra.codeMsg ?? h.codeMsg, showingHelp: extra.showingHelp ?? h.showingHelp, hasSave: !!loadSaved(), ...extra }));
+    setHud((h) => snapHud(sim.current, { ...h, toast: extra.toast ?? h.toast, exitAsk: extra.exitAsk ?? h.exitAsk, exitScreen: extra.exitScreen ?? h.exitScreen, saveOpen: extra.saveOpen ?? h.saveOpen, confirmNew: extra.confirmNew ?? h.confirmNew, codeMsg: extra.codeMsg ?? h.codeMsg, showingHelp: extra.showingHelp ?? h.showingHelp, hasSave: !!loadSaved(), ...extra }));
   }, []);
   const toast = useCallback((t: string): void => { bump({ toast: t }); window.setTimeout(() => { setHud((h) => h.toast === t ? { ...h, toast: "" } : h); }, 2400); }, [bump]);
 
@@ -3232,16 +3249,28 @@ export default function CowboyJohnsCropDefense() {
   const goTitle = useCallback((): void => {
     flush();
     sim.current = null;
-    bump({ screen: "title", exitAsk: false, saveOpen: false, confirmNew: false });
+    bump({ screen: "title", exitAsk: false, exitScreen: false, saveOpen: false, confirmNew: false });
     setHud((h) => ({ ...INIT_HUD, hasSave: !!loadSaved(), toast: h.toast }));
   }, [flush, bump]);
+
+  const backToMenu = useCallback((): void => {
+    LEAVING = false;
+    try { trapBack(); } catch { /* ignore */ }
+    flush();
+    sim.current = null;
+    setHud((h) => ({ ...INIT_HUD, hasSave: !!loadSaved(), toast: h.toast, exitScreen: false, exitAsk: false }));
+  }, [flush]);
 
   const leaveNow = useCallback((): void => {
     LEAVING = true;
     flush();
-    try { window.history.go(TRAP_OK ? -2 : -1); } catch { /* ignore */ }
-    window.setTimeout(() => { LEAVING = false; }, 1500);
-  }, [flush]);
+    bump({ exitAsk: false });
+    tryCloseShell();
+    window.setTimeout(() => {
+      // Browsers (and iOS home-screen PWAs) usually ignore window.close() for pages the user opened.
+      bump({ exitAsk: false, exitScreen: true });
+    }, 300);
+  }, [flush, bump]);
 
   const onCanvasPtr = useCallback((ev: { clientX: number; clientY: number; type: string; preventDefault: () => void }, kind: "down" | "move" | "up"): void => {
     const s = sim.current;
@@ -3273,6 +3302,10 @@ export default function CowboyJohnsCropDefense() {
   useEffect(() => {
     const onKey = (e: KeyboardEvent): void => {
       const h = hudRef.current;
+      if (h.exitScreen) {
+        if (e.key === "Escape" || e.key === "Enter" || e.key === " ") { e.preventDefault(); backToMenu(); }
+        return;
+      }
       if (h.exitAsk) {
         if (e.key === "Escape") { bump({ exitAsk: false }); e.preventDefault(); }
         return;
@@ -3335,7 +3368,7 @@ export default function CowboyJohnsCropDefense() {
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [bump]);
+  }, [bump, backToMenu]);
 
   useEffect(() => {
     type Api = {
@@ -3536,6 +3569,43 @@ export default function CowboyJohnsCropDefense() {
   ) : null;
 
   const overlay = (): JSX.Element | null => {
+    if (hud.exitScreen) {
+      return (
+        <div
+          data-testid="exit-screen"
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="cjcd-exit-title"
+          style={{
+            position: "fixed", inset: 0, zIndex: 80,
+            background: "#1a120c", color: "#f3e6c8",
+            display: "flex", alignItems: "center", justifyContent: "center",
+            padding: "max(24px, env(safe-area-inset-top)) 24px max(24px, env(safe-area-inset-bottom))",
+            boxSizing: "border-box", pointerEvents: "auto", touchAction: "manipulation",
+            fontFamily: t.font.family,
+          }}
+        >
+          <div style={{ width: "min(420px, 100%)", textAlign: "center", display: "flex", flexDirection: "column", alignItems: "center", gap: 14 }}>
+            <div id="cjcd-exit-title" style={{ fontFamily: "Georgia, serif", fontSize: "clamp(22px, 6vw, 32px)", fontWeight: 800, lineHeight: 1.25, textShadow: "0 2px 8px #000" }}>Game saved — thanks for playing, partner!</div>
+            <div style={{ fontSize: 15, color: "#c9b48a", lineHeight: 1.45 }}>swipe the app away to close it</div>
+            <button
+              type="button"
+              data-testid="back-to-menu"
+              autoFocus
+              onClick={backToMenu}
+              onPointerUp={(e) => { e.stopPropagation(); if (e.pointerType !== "mouse") backToMenu(); }}
+              onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); e.stopPropagation(); backToMenu(); } }}
+              style={{
+                marginTop: 8, minHeight: 52, minWidth: 200, padding: "12px 20px", borderRadius: 12,
+                border: `1px solid ${t.border.focus}`, background: t.fill.primary, color: t.text.onPrimary,
+                fontFamily: "inherit", fontSize: 16, fontWeight: 800, cursor: "pointer",
+                WebkitTapHighlightColor: "transparent", touchAction: "manipulation", pointerEvents: "auto",
+              }}
+            >Back to Menu</button>
+          </div>
+        </div>
+      );
+    }
     if (hud.showingHelp && !hud.exitAsk && !hud.saveOpen) return null;
     if (hud.exitAsk) {
       return (
@@ -3588,7 +3658,7 @@ export default function CowboyJohnsCropDefense() {
             {btn("How to Play", () => { const s = sim.current; if (s && s.screen === "play") s.screen = "paused"; bump({ showingHelp: true }); }, { grow: true, test: "help-from-pause" })}
             {btn("Save code", () => bump({ saveOpen: true }), { grow: true, test: "save-from-pause" })}
             {btn("Title screen", () => goTitle(), { grow: true, test: "to-title" })}
-            {btn("Quit farm", () => bump({ exitAsk: true }), { tone: "danger", grow: true })}
+            {btn("Quit farm", () => bump({ exitAsk: true }), { tone: "danger", grow: true, test: "quit-farm" })}
           </div>
         </Modal>
       );
@@ -3666,6 +3736,7 @@ export default function CowboyJohnsCropDefense() {
           {btn("New Game", () => { if (hud.hasSave) bump({ confirmNew: true }); else startNew(); }, { tone: hud.hasSave ? "ghost" : "pri", grow: true, test: "new-game" })}
           {btn("How to Play", () => setHud((h) => ({ ...h, screen: "help", showingHelp: true })), { grow: true, test: "how-to-play" })}
           {btn("Paste save code", () => bump({ saveOpen: true }), { grow: true, test: "paste-save" })}
+          {btn("Exit", leaveNow, { tone: "danger", grow: true, test: "exit" })}
         </div>
         {hud.confirmNew && (
           <div style={{ marginTop: 12, width: "min(360px, 100%)", background: t.bg.elevated, border: `1px solid ${t.border.default}`, borderRadius: 12, padding: 12 }}>
