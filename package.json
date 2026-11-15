@@ -1,0 +1,24 @@
+{
+  "name": "cowboy-johns-crop-defense",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Cowboy John's Crop Defense: a mobile-first tower defense game. Defend Cowboy John's hemp plant from spider mites and other pests.",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc -p . && vite build && rm -rf docs && cp -r dist docs",
+    "preview": "vite preview",
+    "typecheck": "tsc -p ."
+  },
+  "dependencies": {
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1"
+  },
+  "devDependencies": {
+    "@types/react": "^18.3.31",
+    "@types/react-dom": "^18.3.7",
+    "@vitejs/plugin-react": "^4.7.0",
+    "typescript": "^5.9.3",
+    "vite": "^5.4.21"
+  }
+}
