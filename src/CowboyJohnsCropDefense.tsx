@@ -788,14 +788,18 @@ function drawHillside(c: CanvasRenderingContext2D): void {
   c.quadraticCurveTo(180, 28, 0, 52);
   c.closePath();
   fillStroke(c, "#6fd24a", 2.4);
-  // ridge tufts
   const rng = mulberry(19);
-  for (let i = 0; i < 28; i++) {
-    const x = 20 + rng() * (WW - 40), y = 18 + rng() * 70;
+  for (let i = 0; i < 40; i++) {
+    const x = 16 + rng() * (WW - 32), y = 10 + rng() * 90;
+    c.fillStyle = rng() > 0.5 ? "rgba(46,120,36,0.28)" : "rgba(150,230,90,0.28)";
+    c.beginPath(); c.ellipse(x, y, 14 + rng() * 28, 7 + rng() * 14, rng() * 3, 0, Math.PI * 2); c.fill();
+  }
+  for (let i = 0; i < 55; i++) {
+    const x = 20 + rng() * (WW - 40), y = 14 + rng() * 80;
     c.fillStyle = rng() > 0.5 ? "#2e8a28" : "#8ae05a";
     c.beginPath();
     c.moveTo(x, y + 6);
-    c.quadraticCurveTo(x + 4, y - 8, x + 8, y + 5);
+    c.quadraticCurveTo(x + 3 + rng() * 3, y - 7 - rng() * 6, x + 7, y + 5);
     c.quadraticCurveTo(x + 2, y - 2, x, y + 6);
     c.fill();
   }
@@ -917,17 +921,95 @@ function cropAllowed(x: number, y: number): boolean {
   return true;
 }
 
+function grassOk(x: number, y: number): boolean {
+  if (nearPath(x, y).d < PATH_W * 0.55 + 2) return false;
+  if (inBarn(x, y)) return false;
+  if (dist(x, y, POND.x, POND.y) < POND.r + 8) return false;
+  return true;
+}
+
+function drawGrassBlade(c: CanvasRenderingContext2D, x: number, y: number, h: number, col: string, lean: number): void {
+  c.strokeStyle = col; c.lineWidth = 1.15; c.lineCap = "round";
+  c.beginPath(); c.moveTo(x, y); c.quadraticCurveTo(x + lean, y - h * 0.55, x + lean * 1.4, y - h); c.stroke();
+}
+
+function drawGrassDetails(c: CanvasRenderingContext2D): void {
+  const rng = mulberry(33);
+  // tufts and blades
+  for (let i = 0; i < 220; i++) {
+    const x = 12 + rng() * (WW - 24), y = 20 + rng() * (WH - 30);
+    if (!grassOk(x, y)) continue;
+    const col = i % 3 === 0 ? "#2f8a30" : i % 3 === 1 ? "#5ed24a" : "#3aa336";
+    const h = 5 + rng() * 8;
+    const lean = (rng() - 0.5) * 4;
+    const n = 2 + (i % 3);
+    for (let k = 0; k < n; k++) drawGrassBlade(c, x + k * 1.6 - 1.6, y, h + rng() * 3, col, lean + (k - 1) * 1.1);
+  }
+  // tiny flowers
+  const petals = ["#fff6e0", "#ffe36a", "#ff8eb8", "#fffaf0", "#ffd0e8"];
+  for (let i = 0; i < 70; i++) {
+    const x = 16 + rng() * (WW - 32), y = 24 + rng() * (WH - 36);
+    if (!grassOk(x, y)) continue;
+    const col = petals[i % petals.length];
+    for (let k = 0; k < 5; k++) {
+      const a = (k / 5) * Math.PI * 2;
+      c.fillStyle = col;
+      c.beginPath(); c.ellipse(x + Math.cos(a) * 2.2, y + Math.sin(a) * 2.0, 1.7, 1.15, a, 0, Math.PI * 2); c.fill();
+    }
+    c.fillStyle = "#f0c020"; c.beginPath(); c.arc(x, y, 1.15, 0, Math.PI * 2); c.fill();
+  }
+  // clover
+  for (let i = 0; i < 36; i++) {
+    const x = 16 + rng() * (WW - 32), y = 24 + rng() * (WH - 36);
+    if (!grassOk(x, y)) continue;
+    c.fillStyle = "#2f9a38";
+    for (let k = 0; k < 3; k++) {
+      const a = -Math.PI / 2 + k * (Math.PI * 2 / 3);
+      c.beginPath(); c.ellipse(x + Math.cos(a) * 2.4, y + Math.sin(a) * 2.2, 2.3, 1.8, a, 0, Math.PI * 2); c.fill();
+    }
+  }
+  // pebbles
+  for (let i = 0; i < 50; i++) {
+    const x = 16 + rng() * (WW - 32), y = 24 + rng() * (WH - 36);
+    if (!grassOk(x, y)) continue;
+    c.fillStyle = i % 2 ? "rgba(130,120,110,0.85)" : "rgba(90,86,80,0.8)";
+    c.beginPath(); c.ellipse(x, y, 2.2 + rng() * 2.4, 1.3 + rng() * 1.4, rng() * 3, 0, Math.PI * 2); c.fill();
+    c.fillStyle = "rgba(255,255,255,0.25)";
+    c.beginPath(); c.ellipse(x - 0.6, y - 0.4, 0.8, 0.45, 0, 0, Math.PI * 2); c.fill();
+  }
+  // little weeds / dandelion puffs
+  for (let i = 0; i < 22; i++) {
+    const x = 16 + rng() * (WW - 32), y = 24 + rng() * (WH - 36);
+    if (!grassOk(x, y)) continue;
+    c.strokeStyle = "#3a7a28"; c.lineWidth = 1.1;
+    c.beginPath(); c.moveTo(x, y); c.lineTo(x + (rng() - 0.5) * 2, y - 7); c.stroke();
+    c.fillStyle = "rgba(240,235,210,0.85)";
+    c.beginPath(); c.arc(x, y - 8, 2.6, 0, Math.PI * 2); c.fill();
+    c.strokeStyle = "rgba(80,70,40,0.35)"; c.lineWidth = 0.6;
+    c.beginPath(); c.arc(x, y - 8, 2.6, 0, Math.PI * 2); c.stroke();
+  }
+}
+
 function drawFarmBg(c: CanvasRenderingContext2D): void {
-  c.fillStyle = "#4cb83c";
+  c.fillStyle = "#48b53a";
   c.fillRect(0, 0, WW, WH);
   const rng = mulberry(4);
-  for (let i = 0; i < 220; i++) {
+  const patches = ["#3aa332", "#5ccc48", "#2e8a2a", "#6ad24c", "#459c38", "#7ad85a", "#348028", "#58c044"];
+  for (let i = 0; i < 320; i++) {
     const x = rng() * WW, y = rng() * WH;
-    c.fillStyle = rng() > 0.5 ? "#3aa32e" : "#6ad24c";
-    c.beginPath(); c.ellipse(x, y, 18 + rng() * 40, 10 + rng() * 22, rng() * 3, 0, Math.PI * 2); c.fill();
+    c.fillStyle = patches[i % patches.length];
+    c.globalAlpha = 0.55 + rng() * 0.35;
+    c.beginPath(); c.ellipse(x, y, 16 + rng() * 48, 9 + rng() * 26, rng() * 3, 0, Math.PI * 2); c.fill();
+    c.globalAlpha = 1;
+  }
+  // fine tonal noise (prerendered once)
+  for (let i = 0; i < 7000; i++) {
+    const x = rng() * WW, y = rng() * WH;
+    c.fillStyle = rng() > 0.5 ? "rgba(20,70,18,0.16)" : "rgba(210,255,160,0.13)";
+    c.fillRect(x, y, 1 + rng() * 2, 1 + rng() * 2);
   }
   drawHillside(c);
-  // field patches
+  // field soil patches between crop rows
   for (let i = 0; i < 16; i++) {
     const x = 40 + rng() * 900, y = 160 + rng() * 580;
     if (!cropAllowed(x, y)) continue;
@@ -937,6 +1019,7 @@ function drawFarmBg(c: CanvasRenderingContext2D): void {
     c.globalAlpha = 1;
   }
   drawPathDirt(c);
+  drawGrassDetails(c);
   drawPondBasin(c);
   drawBarnRoof(c);
   drawTractor(c, 250, 155);
@@ -981,109 +1064,236 @@ function talkOpen(t: number, talking: boolean): number {
 }
 
 /* ---------- enemies (top-down cartoon) ---------- */
+function bugFill(c: CanvasRenderingContext2D, x: number, y: number, rx: number, ry: number, light: string, mid: string, dark: string, lw = 2.2, rot = 0): void {
+  c.save(); c.translate(x, y); c.rotate(rot);
+  const g = c.createRadialGradient(-rx * 0.35, -ry * 0.4, ry * 0.1, 0, 0, rx);
+  g.addColorStop(0, light); g.addColorStop(0.45, mid); g.addColorStop(1, dark);
+  c.fillStyle = g;
+  c.beginPath(); c.ellipse(0, 0, rx, ry, 0, 0, Math.PI * 2); c.fill();
+  ink(c, lw); c.stroke();
+  c.fillStyle = "rgba(255,255,255,0.28)";
+  c.beginPath(); c.ellipse(-rx * 0.28, -ry * 0.32, rx * 0.28, ry * 0.18, -0.4, 0, Math.PI * 2); c.fill();
+  c.restore();
+}
+function bugLeg(c: CanvasRenderingContext2D, x: number, y: number, ang: number, len: number, t: number, phase: number): void {
+  const kick = Math.sin(t * 10 + phase) * 0.38;
+  const a = ang + kick;
+  ink(c, 1.7);
+  c.beginPath();
+  c.moveTo(x, y);
+  const mx = x + Math.cos(a) * len * 0.55, my = y + Math.sin(a) * len * 0.55;
+  c.lineTo(mx, my);
+  c.lineTo(mx + Math.cos(a + 0.7) * len * 0.5, my + Math.sin(a + 0.7) * len * 0.5);
+  c.stroke();
+  c.fillStyle = INK; c.beginPath(); c.arc(mx, my, 0.8, 0, Math.PI * 2); c.fill();
+}
+function bugAntenna(c: CanvasRenderingContext2D, x: number, y: number, ang: number, len: number, t: number, seed: number): void {
+  const w = Math.sin(t * 8 + seed) * 0.25;
+  ink(c, 1.35);
+  c.beginPath(); c.moveTo(x, y);
+  c.quadraticCurveTo(x + Math.cos(ang + w) * len * 0.5, y + Math.sin(ang + w) * len * 0.5 - 3,
+    x + Math.cos(ang + w) * len, y + Math.sin(ang + w) * len - 2);
+  c.stroke();
+  c.fillStyle = INK; c.beginPath(); c.arc(x + Math.cos(ang + w) * len, y + Math.sin(ang + w) * len - 2, 1.15, 0, Math.PI * 2); c.fill();
+}
+
 function drawMite(c: CanvasRenderingContext2D, t: number, hurt: boolean): void {
-  const w = 1 + Math.sin(t * 14) * 0.08;
-  c.save(); c.scale(w, 2 - w);
-  shadowBlob(c, 0, 7, 8, 4, 0.25);
-  for (let i = 0; i < 6; i++) {
-    const a = (i / 6) * Math.PI * 2 + Math.sin(t * 10 + i) * 0.25;
-    ink(c, 2); c.beginPath(); c.moveTo(0, 0); c.lineTo(Math.cos(a) * 11, Math.sin(a) * 8); c.stroke();
+  const bob = Math.sin(t * 14) * 0.08;
+  c.save(); c.scale(1 + bob, 1 - bob);
+  shadowBlob(c, 0, 8, 9, 4.2, 0.26);
+  for (let i = 0; i < 8; i++) {
+    const base = (i / 8) * Math.PI * 2 + 0.2;
+    bugLeg(c, Math.cos(base) * 4, Math.sin(base) * 3, base, 8.5, t, i * 0.9);
   }
-  oval(c, 0, 0, 8, 6.5, hurt ? "#f07070" : "#e04038", 2.3);
-  disc(c, 6, 0, 4.2, hurt ? "#f0a0a0" : "#ff7a6a", 2);
-  toonEyes(c, 6, -0.5, 2.1, blinkAt(t, 1), 0.6, 0);
-  toonMouth(c, 8.4, 2.2, 2.6, 0.08, true);
+  const mid = hurt ? "#f07070" : "#d03028";
+  bugFill(c, -1, 0.4, 8.4, 6.6, hurt ? "#ffb0b0" : "#ff6a58", mid, hurt ? "#a02828" : "#7a1010", 2.3);
+  bugFill(c, 6.2, 0, 4.6, 4.3, hurt ? "#ffc0c0" : "#ff8a78", hurt ? "#f08080" : "#e04838", "#8a2018", 2.05);
+  // abdomen stripes
+  c.strokeStyle = "rgba(80,10,10,0.35)"; c.lineWidth = 1;
+  for (const sx of [-4, -1.2, 1.6]) { c.beginPath(); c.ellipse(-1, 0.4, 5.2, 4.5, 0, 0.4, 2.7); c.stroke(); void sx; }
+  toonEyes(c, 6.4, -0.6, 2.15, blinkAt(t, 1), 0.65, 0);
+  toonMouth(c, 8.6, 2.3, 2.7, 0.1, true);
+  bugAntenna(c, 9.2, -2.2, -0.9, 6, t, 1);
+  bugAntenna(c, 8.6, -1.4, -0.45, 5.5, t, 2);
   c.restore();
 }
 function drawAphid(c: CanvasRenderingContext2D, t: number, hurt: boolean): void {
-  const w = 1 + Math.sin(t * 16) * 0.1;
-  c.save(); c.scale(w, 2 - w);
-  shadowBlob(c, 0, 7, 7, 3.5, 0.22);
-  oval(c, 0, 0, 8.5, 5.5, hurt ? "#d0f070" : "#7ce03a", 2.2);
-  disc(c, 6, 0, 3.6, "#b8f060", 1.8);
-  toonEyes(c, 6, -0.4, 1.9, blinkAt(t, 2), 0.7, 0);
-  ink(c, 1.6);
-  c.beginPath(); c.moveTo(8, -2); c.quadraticCurveTo(12, -8, 10, -10); c.stroke();
-  c.beginPath(); c.moveTo(8, -1); c.quadraticCurveTo(13, -6, 12, -8); c.stroke();
+  const bob = Math.sin(t * 16) * 0.1;
+  c.save(); c.scale(1 + bob, 1 - bob);
+  shadowBlob(c, 0, 8, 8, 3.6, 0.22);
+  for (let i = 0; i < 6; i++) bugLeg(c, -2 + (i % 3) * 2.5, (i < 3 ? -3.2 : 3.2), (i < 3 ? -1.1 : 1.1) + (i % 3) * 0.15, 7, t, i);
+  bugFill(c, -1, 0, 8.8, 5.6, hurt ? "#e8ff90" : "#b8f868", hurt ? "#c8e050" : "#6ed832", "#2a7a18", 2.15);
+  // segments
+  c.strokeStyle = "rgba(30,80,16,0.35)"; c.lineWidth = 1;
+  for (const sx of [-4, -1, 2]) { c.beginPath(); c.moveTo(sx, -4.4); c.lineTo(sx, 4.4); c.stroke(); }
+  bugFill(c, 6.4, 0, 3.8, 3.5, "#d8ff90", "#9ae050", "#3a8a20", 1.8);
+  toonEyes(c, 6.5, -0.5, 1.95, blinkAt(t, 2), 0.7, 0);
+  bugAntenna(c, 8.4, -2, -0.95, 7, t, 3);
+  bugAntenna(c, 8.2, -1.2, -0.55, 6.5, t, 4);
+  // cornicles
+  ink(c, 1.6); c.beginPath(); c.moveTo(-8, -2); c.lineTo(-11, -5); c.stroke();
+  c.beginPath(); c.moveTo(-8, 2); c.lineTo(-11, 5); c.stroke();
   c.restore();
 }
 function drawBeetle(c: CanvasRenderingContext2D, t: number, hurt: boolean): void {
-  shadowBlob(c, 0, 9, 11, 5, 0.28);
-  oval(c, 0, 1, 11, 8, hurt ? "#5a5a7a" : "#3a3a58", 2.6);
-  ink(c, 2); c.beginPath(); c.moveTo(0, -6); c.lineTo(0, 8); c.stroke();
-  disc(c, 8, 0, 5, "#2a2a40", 2.2);
-  toonEyes(c, 8, 0, 2.3, blinkAt(t, 3), 0.5, 0);
-  c.fillStyle = "#8af0ff"; disc(c, -4, -3, 2, "#7ae0f0", 1);
-  disc(c, -4, 3, 2, "#7ae0f0", 1);
+  const bob = Math.sin(t * 9) * 0.05;
+  c.save(); c.scale(1 + bob, 1 - bob);
+  shadowBlob(c, 0, 10, 12, 5, 0.28);
+  for (let i = 0; i < 6; i++) bugLeg(c, -2, (i < 3 ? -5 : 5), (i < 3 ? -1.2 : 1.2) + (i % 3 - 1) * 0.35, 9, t, i * 1.1);
+  const shellL = hurt ? "#8a8ab0" : "#5a6a9a";
+  const shellM = hurt ? "#4a4a70" : "#2e3458";
+  bugFill(c, -1, 1, 11.4, 8.4, hurt ? "#9aa0c8" : "#6a7ab0", shellM, "#161428", 2.6);
+  // elytra split + highlight ridges
+  ink(c, 2.1); c.beginPath(); c.moveTo(2, -7.2); c.lineTo(-2, 8.5); c.stroke();
+  c.strokeStyle = "rgba(160,200,255,0.28)"; c.lineWidth = 1.2;
+  c.beginPath(); c.ellipse(-1, 0, 7, 6, 0, 2.2, 4.2); c.stroke();
+  // glossy spots
+  bugFill(c, -4, -3.2, 2.3, 2, "#b8f0ff", "#70d8f0", "#2a6080", 1.1);
+  bugFill(c, -4, 3.4, 2.3, 2, "#b8f0ff", "#70d8f0", "#2a6080", 1.1);
+  bugFill(c, 8.2, 0, 5.2, 4.8, hurt ? "#6a6a88" : "#3a3a58", "#222238", "#0c0c18", 2.15);
+  toonEyes(c, 8.4, -0.2, 2.35, blinkAt(t, 3), 0.55, 0);
+  bugAntenna(c, 11, -2.4, -0.85, 6, t, 5);
+  bugAntenna(c, 11, 2.2, 0.85, 6, t, 6);
+  c.restore();
 }
 function drawCaterpillar(c: CanvasRenderingContext2D, t: number, hurt: boolean): void {
-  shadowBlob(c, 0, 8, 13, 4, 0.22);
-  const col = hurt ? "#f0c070" : "#f0a018";
+  shadowBlob(c, 0, 9, 15, 4.2, 0.22);
+  const col = hurt ? "#f0c070" : "#f09810";
+  const lit = hurt ? "#ffe8a8" : "#ffd060";
+  const dk = hurt ? "#b07020" : "#a05808";
   for (let i = 3; i >= 0; i--) {
-    const squ = Math.sin(t * 9 + i) * 1.4;
-    oval(c, -8 + i * 6 + squ * 0.3, Math.sin(t * 9 + i) * 0.8, 5.2, 5.4, i === 3 ? "#ffc04a" : col, 2);
+    const squ = Math.sin(t * 9 + i) * 1.6;
+    const y = Math.sin(t * 9 + i) * 0.9;
+    bugFill(c, -9 + i * 6.2 + squ * 0.35, y, i === 3 ? 5.6 : 5.3, i === 3 ? 5.8 : 5.5, i === 3 ? "#ffe08a" : lit, i === 3 ? "#ffc04a" : col, dk, 2.05);
+    // prolegs
+    if (i < 3) {
+      ink(c, 1.5);
+      c.beginPath(); c.moveTo(-9 + i * 6.2, y + 4.5); c.lineTo(-9 + i * 6.2 + Math.sin(t * 9 + i) * 1.2, y + 7); c.stroke();
+    }
   }
-  toonEyes(c, 12, -1, 2.2, blinkAt(t, 4), 0.6, 0);
-  toonMouth(c, 15, 2, 3, 0.15, true);
+  toonEyes(c, 12.4, -1.1, 2.25, blinkAt(t, 4), 0.6, 0);
+  toonMouth(c, 15.4, 2.1, 3.1, 0.18, true);
+  bugAntenna(c, 14.5, -3.6, -1.05, 5.5, t, 7);
+  bugAntenna(c, 13.6, -2.8, -0.6, 5, t, 8);
 }
 function drawInchworm(c: CanvasRenderingContext2D, t: number, hurt: boolean): void {
-  const arch = 3 + Math.sin(t * 12) * 3;
-  shadowBlob(c, 0, 7, 8, 3, 0.2);
-  ink(c, 2.4);
-  c.fillStyle = hurt ? "#c0f080" : "#8ce050";
-  c.beginPath(); c.moveTo(-8, 3); c.quadraticCurveTo(0, -arch, 8, 3); c.quadraticCurveTo(0, 6 - arch * 0.2, -8, 3); c.fill(); c.stroke();
-  disc(c, 8, 2, 3.2, "#b0f070", 1.6);
-  toonEyes(c, 8, 1, 1.5, blinkAt(t, 5), 0.5, 0);
+  const arch = 3.2 + Math.sin(t * 12) * 3.4;
+  shadowBlob(c, 0, 8, 9, 3, 0.2);
+  const mid = hurt ? "#c0f080" : "#7cdb40";
+  c.save();
+  ink(c, 2.35);
+  const g = c.createLinearGradient(0, -arch, 0, 6);
+  g.addColorStop(0, hurt ? "#e8ffb0" : "#c8ff70"); g.addColorStop(0.6, mid); g.addColorStop(1, "#2e7a16");
+  c.fillStyle = g;
+  c.beginPath(); c.moveTo(-9, 3.2); c.quadraticCurveTo(0, -arch, 9, 3.2); c.quadraticCurveTo(0, 6.4 - arch * 0.2, -9, 3.2); c.fill(); c.stroke();
+  // segments along the arch
+  c.strokeStyle = "rgba(30,80,16,0.35)"; c.lineWidth = 1;
+  for (const u of [-0.45, 0, 0.45]) {
+    const px = u * 8, py = -arch * (1 - u * u) + 1;
+    c.beginPath(); c.moveTo(px, py - 2); c.lineTo(px, py + 3); c.stroke();
+  }
+  bugFill(c, 8.4, 2.1, 3.4, 3.3, "#d0ff88", "#9ae050", "#3a8a1c", 1.65);
+  toonEyes(c, 8.5, 1.2, 1.55, blinkAt(t, 5), 0.55, 0);
+  c.restore();
 }
 function drawGnat(c: CanvasRenderingContext2D, t: number, hurt: boolean): void {
-  const flap = Math.sin(t * 28) * 0.5;
-  shadowBlob(c, 0, 14, 7, 3, 0.18);
-  c.save(); c.translate(0, Math.sin(t * 10) * -2);
-  c.save(); c.rotate(-0.6 + flap); oval(c, -2, -2, 8, 3.2, "rgba(230,245,255,0.85)", 1.5); c.restore();
-  c.save(); c.rotate(0.6 - flap); oval(c, -2, 2, 8, 3.2, "rgba(230,245,255,0.85)", 1.5); c.restore();
-  oval(c, 0, 0, 6, 4.5, hurt ? "#c0a0d0" : "#6a5078", 2);
-  disc(c, 4, 0, 3, "#8a70a0", 1.6);
-  toonEyes(c, 4.2, -0.4, 1.8, blinkAt(t, 6), 0.7, 0);
+  const flap = Math.sin(t * 28) * 0.55;
+  shadowBlob(c, 0, 15, 7.5, 3.2, 0.18);
+  c.save(); c.translate(0, Math.sin(t * 10) * -2.4);
+  // wings with veins
+  const wing = (side: number, f: number): void => {
+    c.save(); c.rotate(side * (0.7 - f));
+    const wg = c.createLinearGradient(0, 0, 10, 0);
+    wg.addColorStop(0, "rgba(230,245,255,0.92)"); wg.addColorStop(1, "rgba(180,210,230,0.35)");
+    c.fillStyle = wg;
+    c.beginPath(); c.ellipse(5, side * 2, 9.2, 3.6, 0, 0, Math.PI * 2); c.fill();
+    ink(c, 1.15); c.strokeStyle = "rgba(40,40,60,0.45)"; c.stroke();
+    c.strokeStyle = "rgba(40,40,70,0.3)"; c.lineWidth = 0.7;
+    c.beginPath(); c.moveTo(0, 0); c.lineTo(12, side * 1.5); c.moveTo(2, 0); c.lineTo(9, side * 3); c.stroke();
+    c.restore();
+  };
+  wing(-1, flap); wing(1, -flap);
+  bugFill(c, 0, 0, 6.2, 4.6, hurt ? "#e0c0f0" : "#9a7ab0", hurt ? "#a080c0" : "#634878", "#2a1a38", 2.05);
+  bugFill(c, 4.6, 0, 3.3, 3.1, "#c8a8d8", "#8a68a8", "#3a2850", 1.7);
+  toonEyes(c, 4.7, -0.5, 1.85, blinkAt(t, 6), 0.7, 0);
+  bugAntenna(c, 6.4, -1.8, -1.0, 5.5, t, 9);
+  bugAntenna(c, 6.2, -1.1, -0.5, 5, t, 10);
   c.restore();
 }
 function drawMildew(c: CanvasRenderingContext2D, t: number, hurt: boolean): void {
-  c.globalAlpha = 0.82;
-  const j = Math.sin(t * 4) * 1.5;
-  oval(c, 0, j, 12, 9, hurt ? "#f0e8c0" : "#e8e0c8", 2);
-  for (let i = 0; i < 6; i++) disc(c, Math.cos(i) * 6, j + Math.sin(i * 1.7) * 4, 2.4, "#f8f4dc", 1);
-  toonEyes(c, 2, j - 1, 2.4, blinkAt(t, 7), 0.2, 0);
-  toonMouth(c, 3, j + 3, 3.5, 0.2, false);
+  c.globalAlpha = 0.86;
+  const j = Math.sin(t * 4) * 1.6;
+  bugFill(c, 0, j, 12.4, 9.2, hurt ? "#fff8d8" : "#f4eed8", hurt ? "#e8dca8" : "#e0d8c0", "#a89c78", 2.05);
+  for (let i = 0; i < 8; i++) {
+    const a = i * 0.85 + t * 0.3;
+    bugFill(c, Math.cos(a) * 6.5, j + Math.sin(a * 1.3) * 4.2, 2.6, 2.3, "#fffdf4", "#efe8c8", "#c8c09a", 1.1);
+  }
+  toonEyes(c, 2.2, j - 1.2, 2.45, blinkAt(t, 7), 0.2, 0);
+  toonMouth(c, 3.2, j + 3.2, 3.6, 0.22, false);
   c.globalAlpha = 1;
 }
 function drawQueen(c: CanvasRenderingContext2D, t: number, hurt: boolean): void {
-  shadowBlob(c, 0, 12, 14, 6, 0.3);
-  oval(c, -2, 2, 13, 10, hurt ? "#f06090" : "#c01858", 2.8);
+  const bob = Math.sin(t * 8) * 0.05;
+  c.save(); c.scale(1 + bob, 1 - bob);
+  shadowBlob(c, 0, 13, 15, 6, 0.3);
+  for (let i = 0; i < 8; i++) bugLeg(c, -1, 1, (i / 8) * Math.PI * 2, 11, t, i);
+  bugFill(c, -2, 2.2, 13.6, 10.2, hurt ? "#ff90b0" : "#f04878", hurt ? "#e04070" : "#b01450", "#5a0828", 2.7);
+  c.strokeStyle = "rgba(80,0,30,0.3)"; c.lineWidth = 1.2;
+  for (const sx of [-6, -2, 2]) { c.beginPath(); c.ellipse(-2, 2.2, 9, 7, 0, 0.3, 2.8); c.stroke(); void sx; }
   // crown
-  c.beginPath(); c.moveTo(4, -10); c.lineTo(7, -16); c.lineTo(10, -9); c.lineTo(13, -15); c.lineTo(16, -8);
-  fillStroke(c, "#f0c030", 2);
-  disc(c, 10, -2, 6, "#ff6a8a", 2.2);
-  toonEyes(c, 10, -3, 2.6, blinkAt(t, 8), 0.4, 0);
-  toonMouth(c, 13, 1, 4, 0.2, true);
+  c.beginPath(); c.moveTo(4, -10); c.lineTo(7, -17); c.lineTo(10, -9.5); c.lineTo(13.5, -16.5); c.lineTo(16.5, -8.5);
+  const cg = c.createLinearGradient(8, -18, 14, -8);
+  cg.addColorStop(0, "#ffe680"); cg.addColorStop(1, "#c49010");
+  c.fillStyle = cg; c.fill(); ink(c, 2); c.stroke();
+  disc(c, 7, -16.4, 1.4, "#fff0a0", 0.8); disc(c, 13.5, -16, 1.4, "#fff0a0", 0.8);
+  bugFill(c, 10.4, -1.6, 6.4, 6, "#ff9ab0", "#ff6a8a", "#8a1838", 2.15);
+  toonEyes(c, 10.5, -3.1, 2.65, blinkAt(t, 8), 0.4, 0);
+  toonMouth(c, 13.6, 1.2, 4.1, 0.22, true);
+  bugAntenna(c, 13.5, -6, -1.05, 6, t, 11);
+  bugAntenna(c, 12.4, -5.2, -0.55, 5.5, t, 12);
+  c.restore();
 }
 function drawLocust(c: CanvasRenderingContext2D, t: number, hurt: boolean): void {
-  const flap = Math.sin(t * 16) * 0.35;
-  shadowBlob(c, 0, 14, 9, 4, 0.2);
-  c.save(); c.translate(0, Math.sin(t * 8) * -2);
-  c.save(); c.rotate(-0.7 + flap); oval(c, -1, -3, 10, 4, "#c8e878", 2); c.restore();
-  oval(c, 0, 0, 9, 6, hurt ? "#c0d060" : "#6a9a28", 2.3);
-  disc(c, 7, 0, 4, "#8ab830", 2);
-  toonEyes(c, 7, -0.5, 2, blinkAt(t, 9), 0.6, 0);
+  const flap = Math.sin(t * 16) * 0.4;
+  shadowBlob(c, 0, 15, 10, 4.2, 0.2);
+  c.save(); c.translate(0, Math.sin(t * 8) * -2.2);
+  c.save(); c.rotate(-0.72 + flap);
+  bugFill(c, 1, -3.4, 11, 4.2, "#e8ff9a", "#c8e878", "#5a8a20", 2.0);
+  c.strokeStyle = "rgba(40,70,16,0.35)"; c.lineWidth = 0.8;
+  c.beginPath(); c.moveTo(-6, -3); c.lineTo(10, -4); c.moveTo(-4, -1); c.lineTo(8, -6); c.stroke();
+  c.restore();
+  for (let i = 0; i < 4; i++) bugLeg(c, -2, (i < 2 ? -4 : 4), (i < 2 ? -1 : 1) + (i % 2) * 0.3, 8, t, i);
+  bugFill(c, 0, 0, 9.4, 6.2, hurt ? "#d8e870" : "#9ccc48", hurt ? "#a0b838" : "#5a9220", "#2a5010", 2.25);
+  // thorax stripes
+  c.strokeStyle = "rgba(30,60,10,0.35)"; c.lineWidth = 1.1;
+  c.beginPath(); c.moveTo(-2, -4); c.lineTo(-2, 4); c.moveTo(2, -4.5); c.lineTo(2, 4.5); c.stroke();
+  bugFill(c, 7.4, 0, 4.3, 3.9, "#c4e860", "#7ab028", "#3a6010", 2.0);
+  toonEyes(c, 7.5, -0.6, 2.05, blinkAt(t, 9), 0.6, 0);
+  bugAntenna(c, 9.6, -2.2, -0.9, 6, t, 13);
+  bugAntenna(c, 9.4, -1.3, -0.45, 5.5, t, 14);
   c.restore();
 }
 function drawKing(c: CanvasRenderingContext2D, t: number, hurt: boolean): void {
-  shadowBlob(c, 0, 16, 18, 7, 0.32);
-  oval(c, 0, 2, 18, 13, hurt ? "#d0c040" : "#3a6a18", 3);
-  disc(c, 12, 0, 8, "#5a8a20", 2.4);
-  toonEyes(c, 12, -1, 3.2, blinkAt(t, 10), 0.5, 0, true);
-  toonMouth(c, 16, 4, 6, 0.35, false);
-  c.fillStyle = "#f0c030"; c.font = "bold 9px Georgia, serif"; c.textAlign = "center";
-  c.fillText("KING", 0, 8);
+  const bob = Math.sin(t * 7) * 0.05;
+  c.save(); c.scale(1 + bob, 1 - bob);
+  shadowBlob(c, 0, 17, 19, 7, 0.32);
+  const flap = Math.sin(t * 12) * 0.25;
+  c.save(); c.rotate(-0.5 + flap); bugFill(c, -2, -10, 12, 5, "#d8f070", "#8ab830", "#3a6010", 2); c.restore();
+  c.save(); c.rotate(0.5 - flap); bugFill(c, -2, 10, 12, 5, "#d8f070", "#8ab830", "#3a6010", 2); c.restore();
+  for (let i = 0; i < 6; i++) bugLeg(c, -2, 2, (i / 6) * Math.PI * 2, 14, t, i);
+  bugFill(c, 0, 2, 18.4, 13.2, hurt ? "#e0d060" : "#7ab038", hurt ? "#b0a030" : "#3a6a18", "#1a3008", 3);
+  c.strokeStyle = "rgba(20,50,8,0.4)"; c.lineWidth = 1.4;
+  for (const r of [8, 12]) { c.beginPath(); c.ellipse(0, 2, r, r * 0.7, 0, 0, Math.PI * 2); c.stroke(); }
+  bugFill(c, 12.4, 0, 8.2, 7.4, "#b8d850", "#5a8a20", "#243810", 2.35);
+  toonEyes(c, 12.5, -1.2, 3.25, blinkAt(t, 10), 0.5, 0, true);
+  toonMouth(c, 16.6, 4.1, 6.1, 0.36, false);
+  c.fillStyle = "#f0c030"; c.font = "bold 9px Georgia, serif"; c.textAlign = "center"; c.textBaseline = "middle";
+  c.strokeStyle = "rgba(0,0,0,0.45)"; c.lineWidth = 3; c.strokeText("KING", 0, 7); c.fillText("KING", 0, 7);
+  bugAntenna(c, 16, -5, -1.0, 7, t, 15);
+  bugAntenna(c, 15, -4, -0.5, 6.5, t, 16);
+  c.restore();
 }
+
 function drawJoeBoss(c: CanvasRenderingContext2D, t: number, hurt: boolean): void {
   shadowBlob(c, 0, 16, 16, 7, 0.3);
   // top-down Joe with mean face and straw hat brim
@@ -1323,21 +1533,98 @@ function goldMetal(c: CanvasRenderingContext2D, x0: number, y0: number, x1: numb
   return g;
 }
 
-function drawGoldChain(c: CanvasRenderingContext2D, cx: number, cy: number, rx: number, ry: number, links: number, t = 0): void {
-  for (let i = 0; i < links; i++) {
-    const a = Math.PI * 0.15 + (i / (links - 1)) * Math.PI * 0.7;
-    const x = cx + Math.cos(a) * rx;
-    const y = cy + Math.sin(a) * ry;
-    const lw = 3.6, lh = 2.4;
+function drawGoldChain(c: CanvasRenderingContext2D, cx: number, neckY: number, chestY: number, halfW: number, t = 0, scale = 1): void {
+  const s = scale;
+  const n = Math.max(10, Math.round((halfW * 2 + (chestY - neckY) * 2) / (4.2 * s)));
+  const pts: Array<{ x: number; y: number; ang: number }> = [];
+  for (let i = 0; i <= n; i++) {
+    const u = i / n;
+    const x = cx + Math.cos(Math.PI + u * Math.PI) * halfW;
+    const y = neckY + Math.pow(Math.sin(u * Math.PI), 1.15) * (chestY - neckY);
+    pts.push({ x, y, ang: 0 });
+  }
+  for (let i = 0; i < pts.length; i++) {
+    const a = i === 0 ? Math.atan2(pts[1].y - pts[0].y, pts[1].x - pts[0].x)
+      : i === pts.length - 1 ? Math.atan2(pts[i].y - pts[i - 1].y, pts[i].x - pts[i - 1].x)
+      : Math.atan2(pts[i + 1].y - pts[i - 1].y, pts[i + 1].x - pts[i - 1].x);
+    pts[i].ang = a;
+  }
+  // Cuban links: thick interlocking flattened ovals, alternating twist
+  for (let i = 0; i < pts.length; i++) {
+    const p = pts[i];
+    const twist = i % 2 === 0 ? 0.12 : Math.PI / 2 - 0.12;
+    const ow = 5.3 * s, oh = 3.5 * s, thick = 1.45 * s;
     c.save();
-    c.translate(x, y);
-    c.rotate(a + Math.PI / 2 + (i % 2 ? 0.4 : -0.15));
-    c.fillStyle = goldMetal(c, -lw, -lh, lw, lh);
-    c.beginPath(); c.ellipse(0, 0, lw, lh, 0, 0, Math.PI * 2); c.fill();
-    c.strokeStyle = "rgba(60,36,4,0.65)"; c.lineWidth = 0.6; c.stroke();
-    c.fillStyle = `rgba(255,250,210,${0.7 + Math.sin(t * 2.4 + i) * 0.25})`;
-    c.beginPath(); c.ellipse(-lw * 0.28, -lh * 0.32, lw * 0.38, lh * 0.28, 0, 0, Math.PI * 2); c.fill();
+    c.translate(p.x, p.y);
+    c.rotate(p.ang + twist);
+    const g = goldMetal(c, -ow, -oh, ow, oh);
+    c.fillStyle = g;
+    c.beginPath();
+    c.ellipse(0, 0, ow, oh, 0, 0, Math.PI * 2, false);
+    c.ellipse(0, 0, Math.max(0.6, ow - thick * 1.55), Math.max(0.4, oh - thick * 1.35), 0, 0, Math.PI * 2, true);
+    c.fill("evenodd");
+    c.strokeStyle = "rgba(70,42,6,0.7)"; c.lineWidth = 0.55 * s;
+    c.beginPath(); c.ellipse(0, 0, ow, oh, 0, 0, Math.PI * 2); c.stroke();
+    c.strokeStyle = "rgba(90,56,10,0.45)"; c.lineWidth = 0.45 * s;
+    c.beginPath(); c.ellipse(0, 0, Math.max(0.6, ow - thick * 1.55), Math.max(0.4, oh - thick * 1.35), 0, 0, Math.PI * 2); c.stroke();
+    c.fillStyle = `rgba(255,250,210,${0.55 + Math.sin(t * 2.2 + i) * 0.3})`;
+    c.beginPath(); c.ellipse(-ow * 0.28, -oh * 0.3, ow * 0.28, oh * 0.2, -0.3, 0, Math.PI * 2); c.fill();
     c.restore();
+  }
+}
+
+function drawJohnShades(c: CanvasRenderingContext2D, cx: number, cy: number, t: number, scale = 1): void {
+  const s = scale;
+  const glint = 0.5 + 0.35 * Math.sin(t * 1.7);
+  // temples back to the ears
+  const gold = goldMetal(c, cx - 28 * s, cy, cx + 28 * s, cy);
+  c.strokeStyle = gold; c.lineWidth = 1.35 * s; c.lineCap = "round";
+  c.beginPath(); c.moveTo(cx - 15 * s, cy - 1.5 * s); c.quadraticCurveTo(cx - 22 * s, cy - 2 * s, cx - 28 * s, cy - 0.5 * s); c.stroke();
+  c.beginPath(); c.moveTo(cx + 15 * s, cy - 1.5 * s); c.quadraticCurveTo(cx + 22 * s, cy - 2 * s, cx + 28 * s, cy - 0.5 * s); c.stroke();
+  const lens = (lx: number, flip: number): void => {
+    c.save();
+    c.translate(lx, cy);
+    c.scale(flip, 1);
+    c.beginPath();
+    c.moveTo(-6.2 * s, -5.2 * s);
+    c.quadraticCurveTo(2 * s, -7.2 * s, 8.4 * s, -3.2 * s);
+    c.quadraticCurveTo(10.2 * s, 1.5 * s, 6.2 * s, 7.2 * s);
+    c.quadraticCurveTo(0.5 * s, 9.4 * s, -5.4 * s, 5.2 * s);
+    c.quadraticCurveTo(-8.6 * s, 0.6 * s, -6.2 * s, -5.2 * s);
+    const lg = c.createLinearGradient(-6 * s, -6 * s, 6 * s, 8 * s);
+    lg.addColorStop(0, "#2c2420");
+    lg.addColorStop(0.28, "#0a0909");
+    lg.addColorStop(0.65, "#141212");
+    lg.addColorStop(1, "#050506");
+    c.fillStyle = lg; c.fill();
+    c.strokeStyle = goldMetal(c, -8 * s, -7 * s, 8 * s, 8 * s);
+    c.lineWidth = 1.85 * s; c.lineJoin = "round"; c.stroke();
+    // glossy reflection
+    c.fillStyle = `rgba(230,240,255,${0.16 + glint * 0.12})`;
+    c.beginPath(); c.ellipse(-0.6 * s, -2.1 * s, 4.2 * s, 1.7 * s, -0.55, 0, Math.PI * 2); c.fill();
+    c.fillStyle = `rgba(255,252,240,${0.45 + glint * 0.4})`;
+    c.beginPath(); c.ellipse(-2.0 * s, -2.6 * s, 1.35 * s, 0.6 * s, -0.5, 0, Math.PI * 2); c.fill();
+    c.restore();
+  };
+  lens(cx - 9.2 * s, -1);
+  lens(cx + 9.2 * s, 1);
+  // gold top bar + double bridge
+  c.fillStyle = goldMetal(c, cx - 6 * s, cy - 6 * s, cx + 6 * s, cy);
+  c.beginPath(); rr(c, cx - 5.6 * s, cy - 6.1 * s, 11.2 * s, 2.0 * s, 0.7 * s); c.fill();
+  c.strokeStyle = goldMetal(c, cx - 2 * s, cy - 4 * s, cx + 2 * s, cy);
+  c.lineWidth = 1.05 * s;
+  c.beginPath(); c.moveTo(cx - 2.4 * s, cy - 2.8 * s); c.lineTo(cx + 2.4 * s, cy - 2.8 * s); c.stroke();
+  c.beginPath(); c.moveTo(cx - 2.2 * s, cy - 1.3 * s); c.lineTo(cx + 2.2 * s, cy - 1.3 * s); c.stroke();
+}
+
+function drawJohnBrows(c: CanvasRenderingContext2D, cx: number, cy: number): void {
+  const brows: Array<{ x: number; flip: number }> = [{ x: cx - 11.5, flip: -1 }, { x: cx + 11.5, flip: 1 }];
+  for (const e of brows) {
+    c.strokeStyle = "#2a1c12"; c.lineWidth = 2.1; c.lineCap = "round";
+    c.beginPath();
+    c.moveTo(e.x + e.flip * 8.5, cy - 8.2);
+    c.quadraticCurveTo(e.x, cy - 10.2, e.x - e.flip * 7.5, cy - 6.4);
+    c.stroke();
   }
 }
 
@@ -1536,8 +1823,7 @@ function drawJohnPortrait(c: CanvasRenderingContext2D, w: number, h: number, t =
   c.fillStyle = neck;
   c.beginPath(); c.ellipse(0, 16, 11, 9, 0, 0, Math.PI * 2); c.fill();
 
-  drawGoldChain(c, 0, 20.5, 19, 12, 11, t);
-  drawGoldChain(c, 0, 24, 15, 8.5, 8, t + 0.6);
+  drawGoldChain(c, 0, 24, 56, 18, t, 1);
 
   // ——— head ———
   // ears (behind jaw slightly)
@@ -1560,8 +1846,8 @@ function drawJohnPortrait(c: CanvasRenderingContext2D, w: number, h: number, t =
   c.beginPath(); c.ellipse(-18, 2, 8, 10, 0.2, 0, Math.PI * 2); c.fill();
   c.beginPath(); c.ellipse(18, 2, 8, 10, -0.2, 0, Math.PI * 2); c.fill();
   // under-hat shadow
-  c.fillStyle = "rgba(40,22,12,0.16)";
-  c.beginPath(); c.ellipse(0, -26, 24, 9, 0, 0, Math.PI * 2); c.fill();
+  c.fillStyle = "rgba(40,22,12,0.12)";
+  c.beginPath(); c.ellipse(0, -30, 22, 7, 0, 0, Math.PI * 2); c.fill();
 
   // nose — lean, straight, weathered
   c.fillStyle = "#b88860";
@@ -1575,7 +1861,8 @@ function drawJohnPortrait(c: CanvasRenderingContext2D, w: number, h: number, t =
   c.beginPath(); c.ellipse(3.2, 2.4, 1.5, 1.1, 0, 0, Math.PI * 2); c.fill();
 
   drawJohnStubble(c, 0, 2, 26, 26);
-  drawJohnEyes(c, 0, -14, blink);
+  drawJohnBrows(c, 0, -12);
+  drawJohnShades(c, 0, -12, t, 1);
 
   // short weathered mustache
   c.fillStyle = "rgba(42,28,16,0.85)";
@@ -1605,7 +1892,7 @@ function drawJohnPortrait(c: CanvasRenderingContext2D, w: number, h: number, t =
   const tipY = hatTip ? -6 - Math.sin(t * 3.2) * 1.2 : 0;
   const tipR = hatTip ? -0.11 : 0;
   c.save();
-  c.translate(0, -30 + tipY);
+  c.translate(0, -48 + tipY);
   c.rotate(tipR);
   // brim (wide, sides lifted)
   const brim = c.createLinearGradient(0, -4, 0, 16);
@@ -1681,8 +1968,8 @@ function drawJohnWorld(c: CanvasRenderingContext2D, t: number, act: FarmAct = "i
   // bandana
   c.fillStyle = "#6a1414";
   c.beginPath(); c.ellipse(0, 0.2, 5.2, 2.4, 0, 0, Math.PI * 2); c.fill();
-  // gold chain (tiny but shiny)
-  drawGoldChain(c, 0, 1.2, 5.6, 3.2, 6, t);
+  // cuban gold chain hanging lower on the chest
+  drawGoldChain(c, 0, 1.8, 8.8, 5.4, t, 0.42);
   // head
   const face = c.createRadialGradient(-1.5, -8, 1, 0, -6, 8);
   face.addColorStop(0, "#d4a478"); face.addColorStop(1, "#8a5a38");
@@ -1691,19 +1978,17 @@ function drawJohnWorld(c: CanvasRenderingContext2D, t: number, act: FarmAct = "i
   // stubble hint
   c.fillStyle = "rgba(40,24,14,0.4)";
   c.beginPath(); c.ellipse(0, -3.2, 5, 3.4, 0, 0, Math.PI * 2); c.fill();
-  // squint
-  const blink = blinkAt(t, 30);
-  c.strokeStyle = "#1a120c"; c.lineWidth = 1.05; c.lineCap = "round";
-  if (blink) {
-    c.beginPath(); c.moveTo(-3.6, -7.2); c.lineTo(-1.2, -7.2); c.stroke();
-    c.beginPath(); c.moveTo(1.2, -7.2); c.lineTo(3.6, -7.2); c.stroke();
-  } else {
-    c.beginPath(); c.moveTo(-3.7, -7.4); c.quadraticCurveTo(-2.4, -6.9, -1.1, -7.4); c.stroke();
-    c.beginPath(); c.moveTo(1.1, -7.4); c.quadraticCurveTo(2.4, -6.9, 3.7, -7.4); c.stroke();
-    c.fillStyle = "#3a4a54";
-    c.beginPath(); c.arc(-2.4, -7.2, 0.7, 0, Math.PI * 2); c.fill();
-    c.beginPath(); c.arc(2.4, -7.2, 0.7, 0, Math.PI * 2); c.fill();
-  }
+  // gold aviator sunglasses
+  c.fillStyle = "#0a0a0a";
+  c.beginPath(); c.ellipse(-2.4, -7.15, 2.15, 1.55, -0.15, 0, Math.PI * 2); c.fill();
+  c.beginPath(); c.ellipse(2.4, -7.15, 2.15, 1.55, 0.15, 0, Math.PI * 2); c.fill();
+  c.strokeStyle = goldMetal(c, -5, -8, 5, -6); c.lineWidth = 0.85;
+  c.beginPath(); c.ellipse(-2.4, -7.15, 2.15, 1.55, -0.15, 0, Math.PI * 2); c.stroke();
+  c.beginPath(); c.ellipse(2.4, -7.15, 2.15, 1.55, 0.15, 0, Math.PI * 2); c.stroke();
+  c.beginPath(); c.moveTo(-0.4, -7.6); c.lineTo(0.4, -7.6); c.stroke();
+  c.fillStyle = "rgba(255,252,240,0.65)";
+  c.beginPath(); c.ellipse(-3.0, -7.5, 0.55, 0.3, -0.4, 0, Math.PI * 2); c.fill();
+  c.beginPath(); c.ellipse(1.8, -7.5, 0.55, 0.3, -0.4, 0, Math.PI * 2); c.fill();
   // thin mouth
   c.strokeStyle = "#5a3020"; c.lineWidth = 0.8;
   c.beginPath(); c.moveTo(-2, -3.1); c.lineTo(1.4, -3.0); c.stroke();
@@ -1711,10 +1996,10 @@ function drawJohnWorld(c: CanvasRenderingContext2D, t: number, act: FarmAct = "i
   drawCigar(c, 2.2, -3.0, 0.45, t, 0.38, true);
   // Stetson
   c.save();
-  c.translate(0, -10.2 + tip);
+  c.translate(0, -12.6 + tip);
   c.rotate(tipR);
   c.fillStyle = "#2e2012";
-  c.beginPath(); c.ellipse(0, 2.4, 11.2, 3.1, 0, 0, Math.PI * 2); c.fill();
+  c.beginPath(); c.ellipse(0, 2.0, 11.2, 2.8, 0, 0, Math.PI * 2); c.fill();
   const crown = c.createLinearGradient(-4, -6, 5, 3);
   crown.addColorStop(0, "#5a4030"); crown.addColorStop(1, "#24160c");
   c.fillStyle = crown;
@@ -1839,13 +2124,13 @@ function ensureSprites(): void {
   }
   for (const kind of EIDS) {
     const frames: HTMLCanvasElement[] = [];
-    for (let f = 0; f < 3; f++) {
-      const p = makeC(72, 72);
+    for (let f = 0; f < 5; f++) {
+      const p = makeC(96, 96);
       const pc = p.getContext("2d");
       if (pc) {
         pc.imageSmoothingEnabled = true;
-        pc.translate(36, 36);
-        drawEnemySprite(pc, kind, f * 0.22, false);
+        pc.translate(48, 48);
+        drawEnemySprite(pc, kind, f * 0.18, false);
       }
       frames.push(p);
     }
@@ -2622,8 +2907,8 @@ function drawFrame(c: CanvasRenderingContext2D, s: Sim, cssW: number, cssH: numb
     c.rotate(e.ang);
     if (e.flying) c.translate(0, Math.sin(s.time * 10 + e.id) * -3);
     const frames = SPR.enemy[e.kind];
-    const fr = frames ? frames[Math.floor(s.time * 8 + e.id) % frames.length] : null;
-    if (fr) c.drawImage(fr, -36, -36);
+    const fr = frames ? frames[Math.floor(s.time * 10 + e.id) % frames.length] : null;
+    if (fr) c.drawImage(fr, -48, -48);
     else drawEnemySprite(c, e.kind, s.time + e.id * 0.2, e.hitT > 0);
     c.restore();
     if (e.hitT > 0) { c.fillStyle = "rgba(255,255,255,0.4)"; ellipse(c, e.x, e.y, e.r + 3, e.r + 2); c.fill(); }
