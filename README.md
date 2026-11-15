@@ -17,6 +17,8 @@ Pests follow a fixed dirt path toward John's crop. Lives are the plant's health 
 
 The farm autosaves between waves on this device. Copy a save code from the menu for a backup.
 
+Cowboy John is your boss, and other hands around South Field have a routine of their own. Listen between waves — the 40-wave campaign has a story.
+
 ## Towers
 
 1. **Ladybug Nest** — eats mites and small pests.

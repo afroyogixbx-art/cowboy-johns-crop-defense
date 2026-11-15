@@ -8,7 +8,8 @@ import type { CSSProperties, ChangeEvent, ReactNode } from "./grok";
 
 type Screen = "title" | "help" | "play" | "paused" | "victory" | "defeat";
 type TowerId = "ladybug" | "neem" | "sticky" | "scarecrow" | "mantis" | "predatory" | "uv" | "duster";
-type EnemyId = "mite" | "aphid" | "beetle" | "caterpillar" | "inchworm" | "gnat" | "mildew" | "queen" | "locust" | "king";
+type EnemyId = "mite" | "aphid" | "beetle" | "caterpillar" | "inchworm" | "gnat" | "mildew" | "queen" | "locust" | "king" | "joe";
+type Speaker = "john" | "joe" | "narrator";
 type TargetMode = "first" | "last" | "close" | "strong";
 type Pt = { x: number; y: number };
 
@@ -46,11 +47,11 @@ interface Plane { id: number; x: number; y: number; vx: number; vy: number; drop
 interface FloatT { id: number; x: number; y: number; text: string; c: string; t: number; max: number }
 interface Fx { id: number; x: number; y: number; t: number; max: number; kind: "puff" | "flash" | "ring" | "slash" | "spark"; c: string; r: number; ang?: number }
 interface SpawnG { kind: EnemyId; n: number; gap: number; delay: number }
-interface JohnMsg { text: string; t: number; modal: boolean }
+interface JohnMsg { text: string; t: number; modal: boolean; who?: Speaker; beat?: "intro" | "joeHello" | "reveal" }
 interface SaveData {
   v: 1; mapId: string; wave: number; cash: number; lives: number; maxLives: number; won40: boolean;
   towers: { kind: TowerId; x: number; y: number; a: number; b: number; tgt: TargetMode; charges: number; spent: number }[];
-  seen: EnemyId[];
+  seen: EnemyId[]; revealed?: boolean;
 }
 interface Sim {
   screen: Screen; mapId: string; wave: number; waving: boolean; cash: number; lives: number; maxLives: number;
@@ -58,6 +59,7 @@ interface Sim {
   spawnQ: { at: number; kind: EnemyId }[]; waveT: number; selected: number | null; placing: TowerId | null;
   hover: Pt | null; john: JohnMsg | null; intro: boolean; won40: boolean; time: number; uid: number;
   seen: EnemyId[]; dirty: boolean; over: boolean; pendingEnd: number; shake: number;
+  revealed: boolean; joeHere: boolean; johnHere: boolean;
 }
 
 const WW = 1000, WH = 800, PATH_W = 44, START_CASH = 650, START_LIVES = 100, SELL = 0.7, MAX_WAVE = 40, SAVE_KEY = "cjcd-save-v1", CODE_PFX = "CJ1.";
@@ -73,6 +75,9 @@ const PATH_RAW: Pt[] = [
   { x: 920, y: 430 }, { x: 970, y: 410 },
 ];
 const PLANT: Pt = { x: 958, y: 408 };
+const JOE_SPOT: Pt = { x: 108, y: 198 };
+const JOHN_SPOT: Pt = { x: 655, y: 195 };
+const JOE_LINE = "A cup of Joe never hurt anything, right?";
 const BARN = { x: 720, y: 18, w: 210, h: 150 };
 const NOBUILD: { x: number; y: number; r?: number; w?: number; h?: number }[] = [
   { x: BARN.x, y: BARN.y, w: BARN.w, h: BARN.h },
@@ -135,6 +140,7 @@ const EDEFS: Record<EnemyId, EnemyDef> = {
   queen: { id: "queen", name: "Mite Queen", hp: 220, spd: 34, reward: 22, leak: 5, r: 16 },
   locust: { id: "locust", name: "Locust", hp: 28, spd: 78, reward: 3, leak: 2, r: 10, flying: true },
   king: { id: "king", name: "Locust Swarm King", hp: 900, spd: 32, reward: 80, leak: 20, r: 22, armor: 3, boss: true },
+  joe: { id: "joe", name: "Joe", hp: 1400, spd: 30, reward: 120, leak: 25, r: 22, armor: 4, boss: true },
 };
 const EIDS = Object.keys(EDEFS) as EnemyId[];
 
@@ -165,6 +171,77 @@ const JOHN_NEW: Partial<Record<EnemyId, string>> = {
   queen: "Mite Queen comin' through. She'll birth a stream of mites unless you put her down quick.",
   king: "That's the Locust Swarm King. Big, ugly, and he sheds flyers. Everything you've got, now.",
 };
+
+const JOE_AWAY = [4, 8, 10, 14, 18, 20, 24, 28, 30, 34, 36, 38, 40];
+function joeAwayFor(wave: number): boolean { return JOE_AWAY.indexOf(wave) >= 0; }
+
+const JOE_HELLO = JOE_LINE + " Name's Joe. I lend a hand on South Field when John needs one — fence line, mostly.";
+const JOE_REVEAL = "You finally noticed. I was wonderin' how many walks it'd take. Those mites? They've always been mine to send. This farm just didn't know it yet. " + JOE_LINE;
+const JOHN_ON_REVEAL = "Joe... you were on my payroll. Get off my land. Farmhand — take him down. That's an order.";
+
+function joeHereAt(wave: number, revealed: boolean, won40: boolean, waving: boolean): boolean {
+  if (won40) return false;
+  if (revealed && wave >= 40) return !waving; // on the porch for the reveal, then he's the boss
+  if (revealed) return false;
+  return !joeAwayFor(wave);
+}
+
+function visitAfter(cleared: number): { text: string; who: Speaker } | null {
+  const next = cleared + 1;
+  if (joeAwayFor(next)) {
+    const leaves: Record<number, { text: string; who: Speaker }> = {
+      3: { who: "joe", text: "Path looks fine from here. I'll go walk the north fence — holler if you need me." },
+      7: { who: "joe", text: "I'm gonna stretch my legs down the far line. You hold the gate." },
+      9: { who: "joe", text: "Something I want to check in the far field. Won't be long." },
+      13: { who: "joe", text: "Routine walk. I'll be back before the next bunch, I'm sure." },
+      17: { who: "joe", text: "Fence ain't gonna check itself. You keep supper on the plant." },
+      19: { who: "joe", text: "I'll just be out a spell. Don't wait on me." },
+      23: { who: "joe", text: "Same walk as always. See you in a bit." },
+      27: { who: "joe", text: "I know the way. You know the gate." },
+      29: { who: "joe", text: "Don't follow me on my rounds, farmhand. Just hold the line." },
+      33: { who: "joe", text: "I've got business down the fence. That's all you need to know." },
+      35: { who: "joe", text: "I'll be out. Try not to lose the crop while I'm gone." },
+      37: { who: "joe", text: "One more walk. You'll manage." },
+    };
+    return leaves[cleared] ?? { who: "joe", text: "I'm gonna walk the fence. Won't be long." };
+  }
+  const visits: Record<number, { text: string; who: Speaker }> = {
+    1: { who: "joe", text: "Just makin' my usual stop. You keep those ladybugs fed, I'll keep the fence honest." },
+    2: { who: "joe", text: "Same time as yesterday. That's how a farm runs — routine." },
+    4: { who: "joe", text: "Miss anything? I was down the fence line. Darn things always sneak in when I've just walked off." },
+    5: { who: "john", text: "Joe stopped by again. He's a good hand, even if he's got his own clock." },
+    6: { who: "joe", text: "Nice line you've built. I'll be around the usual spot if you want a second set of eyes." },
+    8: { who: "joe", text: "Back again. Rotten luck, those mites waitin' till I stepped out." },
+    10: { who: "john", text: "Locusts the minute Joe takes a walk. Rotten timing... or a funny clock." },
+    11: { who: "joe", text: "You held the king without me. Almost like they knew I'd be gone, huh?" },
+    12: { who: "john", text: "Joe's leanin' on that fence like always. Can't shake how quiet it gets when he isn't." },
+    14: { who: "joe", text: "See? I take one walk and they come pourin' in. Farm life's like that." },
+    15: { who: "john", text: "I walked the fence Joe said he was checkin'. Didn't see him out there." },
+    16: { who: "joe", text: "Don't you worry what I get up to on my rounds. You just keep the plant green." },
+    18: { who: "john", text: "There it is again. Joe's usual spot is empty, and the path fills. I don't love that pattern." },
+    19: { who: "john", text: "Joe's back, smilin' like nothin' happened. Keep your eyes open, farmhand." },
+    20: { who: "john", text: "Every tenth wave, he's gone, and a king comes stompin'. I don't like how this lines up." },
+    21: { who: "joe", text: "You keep lookin' at me like that. I was checkin' the fence, that's all." },
+    22: { who: "john", text: "I want you workin' this farm, farmhand — and I want you noticin' things I might miss." },
+    24: { who: "john", text: "Same story. He leaves. They come. I ain't callin' a good hand a liar yet, but..." },
+    25: { who: "joe", text: "A man can't be two places. You handle the path; I handle the walk." },
+    26: { who: "john", text: "If that pattern holds, he'll vanish before the next bad wave. Watch the fence post." },
+    28: { who: "john", text: "Empty post, full path. I'm startin' to think it ain't luck." },
+    30: { who: "john", text: "I don't think it's luck, farmhand. Keep your eyes on Joe." },
+    31: { who: "joe", text: "You and John can stare all you want. I've got rounds." },
+    32: { who: "john", text: "He's still comin' around like a neighbor. I don't trust that smile anymore." },
+    39: { who: "john", text: "If he shows his face after this, I want you standin' with me." },
+  };
+  return visits[cleared] ?? null;
+}
+
+function awayLine(wave: number): { text: string; who: Speaker } {
+  if (wave <= 8) return { who: "narrator", text: "Joe hasn't stopped by the fence. The dirt path is already stirring." };
+  if (wave === 10 || wave === 20 || wave === 30) return { who: "john", text: "Joe's usual spot is empty — and something big is on the wind. Hold the line." };
+  if (wave < 20) return { who: "narrator", text: "The usual spot by the fence is empty. Then the path starts to tremble." };
+  if (wave < 30) return { who: "john", text: "Same as last time. Joe's gone. They're not." };
+  return { who: "john", text: "He's gone again. I think we know what that means. Get ready." };
+}
 
 function clamp(n: number, a: number, b: number): number { return n < a ? a : n > b ? b : n; }
 function lerp(a: number, b: number, t: number): number { return a + (b - a) * t; }
@@ -295,7 +372,7 @@ function simToSave(s: Sim): SaveData {
   return {
     v: 1, mapId: s.mapId, wave: s.wave, cash: s.cash, lives: s.lives, maxLives: s.maxLives, won40: s.won40,
     towers: s.towers.map((t) => ({ kind: t.kind, x: t.x, y: t.y, a: t.a, b: t.b, tgt: t.tgt, charges: t.charges, spent: t.spent })),
-    seen: s.seen.slice(),
+    seen: s.seen.slice(), revealed: s.revealed,
   };
 }
 function exportCodeFrom(data: SaveData): string {
@@ -358,14 +435,20 @@ function waveGroups(wave: number): SpawnG[] {
   else if (loop === 7) { add("beetle", 6, 0.7); add("aphid", 10, 0.3, 2); }
   else if (loop === 8) { add("mite", 10, 0.35); add("gnat", 6, 0.5, 3); add("aphid", 8, 0.3, 5); }
   else if (loop === 9) { add("beetle", 6, 0.65); add("gnat", 8, 0.4, 2); add("mite", 12, 0.3, 4); }
-  else if (loop === 10 || loop === 20 || loop === 30 || loop === 40) {
+  else if (loop === 10 || loop === 20 || loop === 30) {
     add("mite", 12 + (loop / 10) * 4, 0.28);
     add("locust", 6 + loop / 10, 0.55, 2);
     add("king", 1, 1, 5);
     add("locust", 8 + loop / 5, 0.45, 8);
     if (loop >= 20) add("beetle", 8, 0.5, 6);
     if (loop >= 30) add("mildew", 6, 0.5, 7);
-    if (loop >= 40) add("queen", 2, 1.2, 9);
+  } else if (loop === 40) {
+    add("mite", 16, 0.28);
+    add("locust", 10, 0.5, 2);
+    add("joe", 1, 1, 5);
+    add("locust", 12, 0.4, 8);
+    add("beetle", 8, 0.5, 6);
+    add("queen", 2, 1.2, 9);
   } else if (loop === 11) { add("caterpillar", 6, 0.7); add("mite", 10, 0.35, 3); }
   else if (loop === 12) { add("caterpillar", 8, 0.55); add("aphid", 12, 0.28, 2); }
   else if (loop === 13) { add("gnat", 10, 0.4); add("caterpillar", 6, 0.6, 3); add("beetle", 5, 0.7, 4); }
@@ -397,15 +480,22 @@ function waveGroups(wave: number): SpawnG[] {
   return g;
 }
 
-function waveHint(wave: number, seen: EnemyId[]): string | null {
+function newEnemyLine(wave: number, seen: EnemyId[]): string | null {
   const groups = waveGroups(wave);
   const kinds: EnemyId[] = [];
   for (const g of groups) if (kinds.indexOf(g.kind) < 0) kinds.push(g.kind);
   for (const k of kinds) {
+    if (k === "joe") continue;
     if (seen.indexOf(k) < 0 && JOHN_NEW[k]) return JOHN_NEW[k] as string;
   }
-  if (wave % 10 === 0) return JOHN_NEW.king as string;
-  if (wave === MAX_WAVE + 1) return "The crop stood, farmhand! Freeplay starts now — pests keep gettin' meaner. Stay sharp.";
+  if ((wave === 10 || wave === 20 || wave === 30) && seen.indexOf("king") < 0) return JOHN_NEW.king as string;
+  return null;
+}
+function waveHint(wave: number, seen: EnemyId[]): string | null {
+  const neu = newEnemyLine(wave, seen);
+  if (neu) return neu;
+  if (wave === MAX_WAVE + 1) return "The land's quieter without Joe. The pests aren't. Freeplay starts now — stay sharp.";
+  if (joeAwayFor(wave)) return null;
   return JOHN_TIPS[(wave - 1) % JOHN_TIPS.length];
 }
 
@@ -523,7 +613,7 @@ function canUpgrade(t: Tower, path: 0 | 1): boolean {
 }
 
 function hpMultWave(wave: number, kind: EnemyId): number {
-  if (kind === "king") return scaleKing(wave) / EDEFS.king.hp;
+  if (kind === "king" || kind === "joe") return scaleKing(wave) / EDEFS.king.hp;
   return scaleHp(EDEFS[kind].hp, wave) / EDEFS[kind].hp;
 }
 
@@ -968,6 +1058,7 @@ function drawEnemySprite(c: CanvasRenderingContext2D, kind: EnemyId, t: number, 
   else if (kind === "mildew") drawMildew(c, t, hurt);
   else if (kind === "queen") drawQueen(c, t, hurt);
   else if (kind === "locust") drawLocust(c, t, hurt, false);
+  else if (kind === "joe") drawJoeBoss(c, t, hurt);
   else drawLocust(c, t, hurt, true);
 }
 
@@ -1128,8 +1219,81 @@ function drawJohnPortrait(c: CanvasRenderingContext2D, w: number, h: number): vo
   c.restore();
 }
 
+function drawJoePortrait(c: CanvasRenderingContext2D, w: number, h: number, mean = false): void {
+  c.clearRect(0, 0, w, h);
+  const g = c.createLinearGradient(0, 0, 0, h);
+  g.addColorStop(0, mean ? "#2a1810" : "#3a3020"); g.addColorStop(1, "#1c140c");
+  c.fillStyle = g; c.fillRect(0, 0, w, h);
+  c.save(); c.translate(w / 2, h * 0.62); const s = Math.min(w, h) / 90;
+  c.scale(s, s);
+  // shoulders — olive work shirt, not John's denim
+  c.fillStyle = mean ? "#3a4a28" : "#6a7a40"; ellipse(c, 0, 38, 36, 20); c.fill();
+  c.fillStyle = "#c4b48a"; c.fillRect(-8, 10, 16, 8);
+  // face, clean-shaven
+  c.fillStyle = "#e0b888"; c.fillRect(-8, 4, 16, 12);
+  ellipse(c, 0, -6, 15, 17); c.fill();
+  ellipse(c, -15, -3, 3.5, 5.5); c.fill(); ellipse(c, 15, -3, 3.5, 5.5); c.fill();
+  // mouth
+  c.strokeStyle = mean ? "#6a3020" : "#8a5a3a"; c.lineWidth = 1.6;
+  if (mean) { c.beginPath(); c.moveTo(-6, 6); c.lineTo(6, 6); c.stroke(); }
+  else { c.beginPath(); c.arc(0, 4, 6, 0.15, Math.PI - 0.15); c.stroke(); }
+  // eyes
+  c.fillStyle = "#1a1008"; ellipse(c, -5.5, -8, 2, mean ? 1.4 : 2.1); c.fill(); ellipse(c, 5.5, -8, 2, mean ? 1.4 : 2.1); c.fill();
+  if (mean) { c.strokeStyle = "#4a2010"; c.beginPath(); c.moveTo(-9, -12); c.lineTo(-3, -9); c.moveTo(9, -12); c.lineTo(3, -9); c.stroke(); }
+  // straw hat (flatter, distinct from John's)
+  c.fillStyle = "#d2b05a";
+  ellipse(c, 0, -16, 30, 5); c.fill();
+  c.beginPath(); c.moveTo(-16, -16); c.quadraticCurveTo(-10, -30, 0, -31); c.quadraticCurveTo(10, -30, 16, -16); c.fill();
+  c.fillStyle = "#3a4a24"; c.fillRect(-16, -18, 32, 3);
+  // little tin cup, a wink at his name — not a machine
+  c.fillStyle = "#8a8a84"; rr(c, 16, 10, 10, 10, 2); c.fill();
+  c.strokeStyle = "#6a6a64"; c.lineWidth = 2; c.beginPath(); c.arc(27, 15, 4, -0.8, 0.8); c.stroke();
+  c.restore();
+}
+
+function drawFarmhand(c: CanvasRenderingContext2D, who: "john" | "joe", t: number): void {
+  const bob = Math.sin(t * 2) * 1.2;
+  c.save(); c.translate(0, bob);
+  if (who === "john") {
+    c.fillStyle = "#3a4a6a"; ellipse(c, 0, 16, 10, 6); c.fill();
+    c.fillStyle = "#5a1c18"; c.beginPath(); c.moveTo(-6, 4); c.lineTo(0, 12); c.lineTo(6, 4); c.closePath(); c.fill();
+    c.fillStyle = "#d2a878"; ellipse(c, 0, -2, 6, 7); c.fill();
+    c.fillStyle = "#4a3018"; c.beginPath(); c.moveTo(-5, 2); c.quadraticCurveTo(0, 5, 5, 2); c.fill();
+    c.fillStyle = "#6a4a20"; ellipse(c, 0, -6, 10, 2.2); c.fill();
+    c.beginPath(); c.moveTo(-5, -6); c.quadraticCurveTo(0, -16, 5, -6); c.fill();
+    c.fillStyle = "#6a1c14"; c.fillRect(-5, -7, 10, 1.6);
+  } else {
+    c.fillStyle = "#6a7a40"; ellipse(c, 0, 16, 10, 6); c.fill();
+    c.fillStyle = "#c4b48a"; c.fillRect(-4, 6, 8, 5);
+    c.fillStyle = "#e0b888"; ellipse(c, 0, -2, 5.8, 6.5); c.fill();
+    c.fillStyle = "#d2b05a"; ellipse(c, 0, -6, 11, 2); c.fill();
+    c.beginPath(); c.moveTo(-6, -6); c.quadraticCurveTo(0, -14, 6, -6); c.fill();
+    c.fillStyle = "#3a4a24"; c.fillRect(-6, -7, 12, 1.5);
+    // cup in hand
+    c.fillStyle = "#8a8a84"; c.fillRect(7, 6, 5, 5);
+  }
+  c.fillStyle = "#1a1008"; ellipse(c, -2, -3, 0.8, 0.9); c.fill(); ellipse(c, 2, -3, 0.8, 0.9); c.fill();
+  c.restore();
+}
+
+function drawJoeBoss(c: CanvasRenderingContext2D, t: number, hurt: boolean): void {
+  const flap = 0.15 + Math.sin(t * 10) * 0.2;
+  c.fillStyle = "rgba(200,220,140,0.35)";
+  c.save(); c.rotate(-flap); ellipse(c, -8, -10, 14, 5); c.fill(); c.restore();
+  c.save(); c.rotate(flap); ellipse(c, 8, -10, 14, 5); c.fill(); c.restore();
+  c.fillStyle = hurt ? "#4a3a20" : "#3a4a28";
+  ellipse(c, 0, 6, 12, 10); c.fill();
+  c.fillStyle = "#e0b888"; ellipse(c, 0, -2, 8, 8); c.fill();
+  c.fillStyle = "#d2b05a"; ellipse(c, 0, -6, 14, 3); c.fill();
+  c.beginPath(); c.moveTo(-7, -6); c.quadraticCurveTo(0, -16, 7, -6); c.fill();
+  c.fillStyle = "#3a4a24"; c.fillRect(-7, -8, 14, 2);
+  c.fillStyle = "#1a1008"; ellipse(c, -2.5, -3, 1.2, 1); c.fill(); ellipse(c, 2.5, -3, 1.2, 1); c.fill();
+  c.strokeStyle = "#6a3020"; c.lineWidth = 1.4; c.beginPath(); c.moveTo(-4, 2); c.lineTo(4, 2); c.stroke();
+  c.strokeStyle = "rgba(232,192,80,0.45)"; c.lineWidth = 3; c.beginPath(); c.arc(0, 0, 18, 0, Math.PI * 2); c.stroke();
+}
+
 /* sprite cache */
-const SPR: { farm?: HTMLCanvasElement; plant: HTMLCanvasElement[]; john?: HTMLCanvasElement } = { plant: [] };
+const SPR: { farm?: HTMLCanvasElement; plant: HTMLCanvasElement[]; john?: HTMLCanvasElement; joe?: HTMLCanvasElement; joeMean?: HTMLCanvasElement } = { plant: [] };
 function makeC(w: number, h: number): HTMLCanvasElement {
   const c = document.createElement("canvas"); c.width = w; c.height = h; return c;
 }
@@ -1149,6 +1313,14 @@ function ensureSprites(): void {
   const jc = j.getContext("2d");
   if (jc) drawJohnPortrait(jc, 160, 180);
   SPR.john = j;
+  const jo = makeC(160, 180);
+  const joc = jo.getContext("2d");
+  if (joc) drawJoePortrait(joc, 160, 180, false);
+  SPR.joe = jo;
+  const jm = makeC(160, 180);
+  const jmc = jm.getContext("2d");
+  if (jmc) drawJoePortrait(jmc, 160, 180, true);
+  SPR.joeMean = jm;
 }
 
 function wiltIndex(lives: number, max: number): number {
@@ -1159,8 +1331,8 @@ function wiltIndex(lives: number, max: number): number {
 /* ---------- simulation ---------- */
 function nid(s: Sim): number { s.uid += 1; return s.uid; }
 
-function say(s: Sim, text: string, modal = false, hold = 7): void {
-  s.john = { text, t: hold, modal };
+function say(s: Sim, text: string, modal = false, hold = 7, who: Speaker = "john", beat?: JohnMsg["beat"]): void {
+  s.john = { text, t: hold, modal, who, beat };
 }
 
 function addFx(s: Sim, x: number, y: number, kind: Fx["kind"], c: string, r = 12, max = 0.35, ang = 0): void {
@@ -1178,7 +1350,7 @@ function posEnemy(e: Enemy): void {
 
 function spawnEnemy(s: Sim, kind: EnemyId, dist0 = 0): Enemy {
   const d = EDEFS[kind];
-  const hp = kind === "king" ? scaleKing(s.wave) : scaleHp(d.hp, s.wave);
+  const hp = (kind === "king" || kind === "joe") ? scaleKing(s.wave) * (kind === "joe" ? 1.15 : 1) : scaleHp(d.hp, s.wave);
   const e: Enemy = {
     id: nid(s), kind, dist: dist0, hp, max: hp, r: d.r, slow: 0, slowT: 0, stun: 0, dots: [],
     armor: d.armor ?? 0, born: s.time, leak: d.leak, reward: d.reward, flying: !!d.flying, camo: !!d.camo,
@@ -1252,7 +1424,7 @@ function leakEnemy(s: Sim, e: Enemy): void {
     s.over = true;
     s.screen = "defeat";
     s.waving = false;
-    say(s, "The crop wilted... We'll plant again, farmhand. Dust yourself off.", true, 99);
+    say(s, s.revealed ? "Joe took the crop. We'll run him off next time, farmhand. That's a promise." : "The crop wilted... We'll plant again, farmhand. Dust yourself off.", true, 99, "john");
     kvSet(SAVE_KEY, null);
   }
 }
@@ -1579,11 +1751,11 @@ function updateEnemy(s: Sim, e: Enemy, dt: number): void {
   posEnemy(e);
   if (e.dist >= PLEN - 6) { leakEnemy(s, e); return; }
   // queen / king spawn
-  if (e.kind === "queen" || e.kind === "king") {
+  if (e.kind === "queen" || e.kind === "king" || e.kind === "joe") {
     e.spawnT -= dt;
     if (e.spawnT <= 0) {
-      e.spawnT = e.kind === "king" ? 2.4 : 2.6;
-      const k: EnemyId = e.kind === "king" ? "locust" : "mite";
+      e.spawnT = e.kind === "joe" ? 2.2 : e.kind === "king" ? 2.4 : 2.6;
+      const k: EnemyId = e.kind === "queen" ? "mite" : "locust";
       spawnEnemy(s, k, Math.max(0, e.dist - 18));
     }
   }
@@ -1600,8 +1772,20 @@ function startWave(s: Sim): boolean {
   s.waving = true;
   s.waveT = 0;
   s.pendingEnd = 0;
-  const hint = waveHint(s.wave, s.seen);
-  if (hint && !s.john?.modal) say(s, hint, false, 6.5);
+  if (s.wave === 40 && s.revealed) {
+    s.joeHere = false;
+    s.johnHere = true;
+    if (!s.john?.modal) say(s, "Take him down, farmhand. That's an order.", false, 7, "john");
+  } else if (!s.john?.modal) {
+    const hint = waveHint(s.wave, s.seen);
+    if (hint) say(s, hint, false, 6.5, "john");
+    else if (joeAwayFor(s.wave) && !s.revealed) {
+      const a = awayLine(s.wave);
+      say(s, a.text, false, 7, a.who);
+    }
+  }
+  if (joeAwayFor(s.wave) && !s.revealed) s.joeHere = false;
+  if (s.revealed && s.wave >= 40) s.joeHere = false;
   return true;
 }
 
@@ -1613,12 +1797,31 @@ function endWave(s: Sim): void {
   addFloat(s, WW * 0.5, 80, `Wave ${s.wave} cleared  +$${bonus}`, "#7bc96f");
   if (s.wave === MAX_WAVE && !s.won40) {
     s.won40 = true;
+    s.revealed = true;
+    s.joeHere = false;
+    s.johnHere = true;
     s.screen = "victory";
-    say(s, "She stands, farmhand! That's my crop still green in the sun. Freeplay's open if you've still got fight in you.", true, 99);
+    say(s, "The crop stands, and that snake is done. You did good work, farmhand. South Field's still ours. Freeplay's open if you've still got fight in you.", true, 99, "john");
   }
   s.wave += 1;
+  applyStoryAfterWave(s);
   s.dirty = true;
   persist(s);
+}
+
+function applyStoryAfterWave(s: Sim): void {
+  if (s.won40) { s.joeHere = false; s.johnHere = true; return; }
+  const next = s.wave;
+  s.johnHere = true;
+  if (next === 40 && !s.revealed) {
+    s.revealed = true;
+    s.joeHere = true;
+    say(s, JOE_REVEAL, true, 99, "joe", "reveal");
+    return;
+  }
+  s.joeHere = joeHereAt(next, s.revealed, s.won40, false);
+  const beat = visitAfter(next - 1);
+  if (beat && !s.john?.modal) say(s, beat.text, false, 7.5, beat.who);
 }
 
 function step(s: Sim, dt: number): void {
@@ -1709,8 +1912,9 @@ function freshSim(): Sim {
     speed: 1, towers: [], enemies: [], shots: [], planes: [], floats: [], fx: [], spawnQ: [], waveT: 0,
     selected: null, placing: null, hover: null, john: null, intro: true, won40: false, time: 0, uid: 1,
     seen: [], dirty: false, over: false, pendingEnd: 0, shake: 0,
+    revealed: false, joeHere: true, johnHere: true,
   };
-  say(s, JOHN_INTRO, true, 99);
+  say(s, JOHN_INTRO, true, 99, "john", "intro");
   return s;
 }
 
@@ -1723,6 +1927,9 @@ function applySave(d: SaveData): Sim {
   s.lives = clamp(d.lives, 0, 999);
   s.maxLives = d.maxLives || START_LIVES;
   s.won40 = !!d.won40;
+  s.revealed = !!d.revealed || s.won40 || s.wave >= 40;
+  s.joeHere = joeHereAt(s.wave, s.revealed, s.won40, false);
+  s.johnHere = true;
   s.mapId = d.mapId || MAP_ID;
   s.seen = Array.isArray(d.seen) ? d.seen.filter((k) => EIDS.indexOf(k) >= 0) : [];
   s.towers = [];
@@ -1765,6 +1972,16 @@ function drawFrame(c: CanvasRenderingContext2D, s: Sim, cssW: number, cssH: numb
   const wi = wiltIndex(s.lives, s.maxLives);
   const pc = SPR.plant[wi];
   if (pc) c.drawImage(pc, PLANT.x - 100, PLANT.y - 170, 200, 225);
+  // hired help on the farm
+  if (s.johnHere && !(s.revealed && s.waving && s.wave >= 40)) {
+    c.save(); c.translate(JOHN_SPOT.x, JOHN_SPOT.y); drawFarmhand(c, "john", s.time); c.restore();
+  }
+  if (s.joeHere && !s.waving) {
+    c.save(); c.translate(JOE_SPOT.x, JOE_SPOT.y); drawFarmhand(c, "joe", s.time + 1); c.restore();
+  } else if (!s.revealed && !s.won40 && joeAwayFor(s.wave)) {
+    // empty usual spot — a worn patch so the absence reads
+    c.fillStyle = "rgba(90,70,40,0.35)"; ellipse(c, JOE_SPOT.x, JOE_SPOT.y + 14, 14, 5); c.fill();
+  }
   // detect auras
   for (const tw of s.towers) {
     if (tw.kind !== "uv") continue;
@@ -2022,7 +2239,13 @@ export default function CowboyJohnsCropDefense() {
         const r = jc.getBoundingClientRect();
         if (jc.width !== Math.floor(r.width * dpr) || jc.height !== Math.floor(r.height * dpr)) { jc.width = Math.floor(r.width * dpr); jc.height = Math.floor(r.height * dpr); }
         const jx = jc.getContext("2d");
-        if (jx) { jx.setTransform(1, 0, 0, 1, 0, 0); jx.clearRect(0, 0, jc.width, jc.height); jx.drawImage(SPR.john, 0, 0, jc.width, jc.height); }
+        if (jx) {
+          jx.setTransform(1, 0, 0, 1, 0, 0); jx.clearRect(0, 0, jc.width, jc.height);
+          const who = sim.current?.john?.who;
+          const beat = sim.current?.john?.beat;
+          const pic = who === "joe" ? ((beat === "reveal" || sim.current?.revealed) && beat === "reveal" ? SPR.joeMean : SPR.joe) : SPR.john;
+          if (pic) jx.drawImage(pic, 0, 0, jc.width, jc.height);
+        }
       }
     };
     raf = requestAnimationFrame(loop);
@@ -2162,6 +2385,7 @@ export default function CowboyJohnsCropDefense() {
       upgrade: (path: 0 | 1) => boolean;
       selectNear: (x: number, y: number) => boolean;
       spawn: (id: string, n: number, dist0?: number) => number;
+      setWave: (n: number) => void;
     };
     const api: Api = {
       get: () => {
@@ -2185,6 +2409,7 @@ export default function CowboyJohnsCropDefense() {
       save: () => { const s = sim.current; if (!s) return ""; persist(s); return exportCodeFrom(simToSave(s)); },
       load: (code: string) => { const d = parseCode(code); if (!d) return "bad"; sim.current = applySave(d); bump(); return "ok"; },
       skipIntro: () => { const s = sim.current; if (s) { s.john = null; s.intro = false; bump(); } },
+      setWave: (n: number) => { const s = sim.current; if (!s) return; s.wave = Math.max(1, n | 0); s.waving = false; s.enemies = []; s.spawnQ = []; applyStoryAfterWave(s); bump(); },
       endWave: () => { const s = sim.current; if (!s) return; s.enemies = []; s.spawnQ = []; s.planes = []; if (s.waving) endWave(s); bump(); },
       sellSelected: () => { const s = sim.current; const tw = s?.towers.find((t) => t.id === s.selected); if (s && tw) { sellTower(s, tw); bump(); } },
       upgrade: (path: 0 | 1) => { const s = sim.current; const tw = s?.towers.find((t) => t.id === s.selected); if (!s || !tw) return false; const ok = upgradeTower(s, tw, path); bump(); return ok; },
@@ -2322,7 +2547,7 @@ export default function CowboyJohnsCropDefense() {
   const johnBanner = hud.john && !hud.john.modal && playHud ? (
     <div data-testid="john-tip" onClick={() => { const s = sim.current; if (s) s.john = null; bump(); }} style={{ display: "flex", gap: 8, alignItems: "center", background: t.bg.elevated, border: `1px solid ${t.border.default}`, borderRadius: 12, padding: 8, marginTop: 6, cursor: "pointer" }}>
       <canvas ref={johnCv} width={80} height={90} style={{ width: 48, height: 54, borderRadius: 8, flex: "0 0 auto", background: t.bg.subtle }} />
-      <div style={{ fontSize: 13, lineHeight: 1.35, flex: 1 }}><b style={{ color: t.text.accent }}>Cowboy John: </b>{hud.john.text}</div>
+      <div style={{ fontSize: 13, lineHeight: 1.35, flex: 1, fontStyle: hud.john.who === "narrator" ? "italic" : "normal" }}>{hud.john.who === "narrator" ? null : <b style={{ color: hud.john.who === "joe" ? "#c4d080" : t.text.accent }}>{hud.john.who === "joe" ? "Joe: " : "Cowboy John: "}</b>}{hud.john.text}</div>
     </div>
   ) : null;
 
@@ -2356,12 +2581,18 @@ export default function CowboyJohnsCropDefense() {
     }
     if (hud.john?.modal && playHud) {
       return (
-        <Modal title="Cowboy John" test="john-intro">
+        <Modal title={hud.john?.who === "joe" ? (hud.john?.beat === "reveal" ? "Joe" : "Joe") : "Cowboy John"} test={hud.john?.beat === "reveal" ? "joe-reveal" : hud.john?.beat === "joeHello" ? "joe-hello" : "john-intro"}>
           <div style={{ display: "flex", gap: 12, alignItems: "flex-start" }}>
             <canvas ref={johnCv} width={160} height={180} style={{ width: 88, height: 100, borderRadius: 10, flex: "0 0 auto", background: t.bg.subtle }} />
             <div style={{ fontSize: 14, lineHeight: 1.45, flex: 1 }}>{hud.john.text}</div>
           </div>
-          <div style={{ marginTop: 14 }}>{btn("Let's get to work", () => { const s = sim.current; if (s) { s.john = null; s.intro = false; } bump(); }, { tone: "pri", grow: true, test: "skip-intro" })}</div>
+          <div style={{ marginTop: 14 }}>{btn(hud.john?.beat === "reveal" ? "Let's end this" : hud.john?.beat === "joeHello" ? "Alright" : "Let's get to work", () => {
+            const s = sim.current; if (!s) { bump(); return; }
+            if (s.john?.beat === "intro") { s.intro = false; say(s, JOE_HELLO, true, 99, "joe", "joeHello"); }
+            else if (s.john?.beat === "reveal") { say(s, JOHN_ON_REVEAL, false, 8, "john"); }
+            else { s.john = null; s.intro = false; }
+            bump();
+          }, { tone: "pri", grow: true, test: hud.john?.beat === "intro" ? "skip-intro" : hud.john?.beat === "reveal" ? "skip-reveal" : "skip-joe" })}</div>
         </Modal>
       );
     }
@@ -2381,7 +2612,7 @@ export default function CowboyJohnsCropDefense() {
     if (hud.screen === "victory") {
       return (
         <Modal title="The crop stands!" test="victory">
-          <div style={{ fontSize: 14, color: t.text.secondary, marginBottom: 12 }}>You held South Field through 40 waves. Cowboy John is proud. Continue into freeplay, or head back to the title.</div>
+          <div style={{ fontSize: 14, color: t.text.secondary, marginBottom: 12 }}>You held South Field through 40 waves, and ran Joe off the land. Cowboy John is proud. Continue into freeplay, or head back to the title.</div>
           <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
             {btn("Freeplay", () => { const s = sim.current; if (s) { s.screen = "play"; s.john = null; persist(s); } bump(); }, { tone: "pri", grow: true, test: "freeplay" })}
             {btn("Title", goTitle, { grow: true })}
@@ -2392,7 +2623,7 @@ export default function CowboyJohnsCropDefense() {
     if (hud.screen === "defeat") {
       return (
         <Modal title="The crop wilted" test="defeat">
-          <div style={{ fontSize: 14, color: t.text.secondary, marginBottom: 12 }}>Cowboy John tips his hat. “We'll plant again, farmhand.” Your run ended on wave {Math.max(1, hud.wave)}.</div>
+          <div style={{ fontSize: 14, color: t.text.secondary, marginBottom: 12 }}>{sim.current?.revealed ? "Joe took the crop this time. John tips his hat. “We run him off next time.”" : "Cowboy John tips his hat. “We'll plant again, farmhand.”"} Your run ended on wave {Math.max(1, hud.wave)}.</div>
           <div style={{ display: "flex", gap: 8 }}>{btn("Try again", startNew, { tone: "pri", grow: true, test: "retry" })}{btn("Title", goTitle, { grow: true })}</div>
         </Modal>
       );
@@ -2409,7 +2640,7 @@ export default function CowboyJohnsCropDefense() {
           else setHud((h) => ({ ...INIT_HUD, hasSave: !!loadSaved(), showingHelp: false, screen: "title" }));
         }, { tone: "pri", test: "help-back", small: true })}
       </div>
-      <p>You're a farmhand on Cowboy John's hemp farm. Pests march the dirt path toward his plant. Place towers beside the path and don't let the crop wilt. Lives are the plant's health — it droops as it takes hits.</p>
+      <p>You're hired help on Cowboy John's hemp farm. Pests march the dirt path toward his plant. Place towers beside the path and don't let the crop wilt. Lives are the plant's health — it droops as it takes hits. John stops by with tips, and other hands on the farm have a routine of their own. There's no forced tutorial.</p>
       <h3 style={{ color: t.text.warning, fontSize: 16 }}>Placing</h3>
       <p>Tap a tower in the shop, then tap a valid spot (green range circle). Red means you can't plant there. Sticky Traps must sit <b>on</b> the path; everything else sits off it. Tap a placed tower to upgrade or sell.</p>
       <h3 style={{ color: t.text.warning, fontSize: 16 }}>Upgrades</h3>
@@ -2424,6 +2655,7 @@ export default function CowboyJohnsCropDefense() {
         <li>Powdery mildew — hidden; needs detection (UV Lamp).</li>
         <li>Mite Queen — sheds mites as she walks.</li>
         <li>Locust Swarm King — every 10 waves, sheds flying locusts.</li>
+        <li>Something worse may be waiting at the end of South Field.</li>
       </ul>
       <h3 style={{ color: t.text.warning, fontSize: 16 }}>Waves</h3>
       <p>40 waves on South Field, then freeplay. Press <b>Start Wave</b> or Space when you're ready. Use 2× (or F) when you trust the line. There's room later for more plants and maps.</p>
