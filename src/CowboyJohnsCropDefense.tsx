@@ -3765,7 +3765,7 @@ export default function CowboyJohnsCropDefense() {
         </Modal>
       );
     }
-    if (hud.john?.modal && playHud && !hud.cut) {
+    if (hud.john?.modal && playHud && !hud.cut && hud.screen !== "victory" && hud.screen !== "defeat") {
       return (
         <Modal title={hud.john?.who === "joe" ? (hud.john?.beat === "reveal" ? "Joe" : "Joe") : "Cowboy John"} test={hud.john?.beat === "reveal" ? "joe-reveal" : hud.john?.beat === "joeHello" ? "joe-hello" : "john-intro"}>
           <div style={{ display: "flex", gap: 12, alignItems: "flex-start" }}>
