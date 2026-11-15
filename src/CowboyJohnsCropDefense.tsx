@@ -1282,47 +1282,450 @@ function drawPlane(c: CanvasRenderingContext2D, p: Plane): void {
 
 type FarmAct = "idle" | "talk" | "hat" | "sip" | "mean";
 function drawFarmhand(c: CanvasRenderingContext2D, who: "john" | "joe", t: number, act: FarmAct = "idle"): void {
+  if (who === "john") { drawJohnWorld(c, t, act); return; }
   const bob = Math.sin(t * 2.4) * 1.6;
   c.save(); c.translate(0, bob);
   shadowBlob(c, 0, 14, 12, 6, 0.28);
-  const shirt = who === "john" ? "#3a6aaa" : "#6a8a3a";
-  oval(c, 0, 6, 11, 9, shirt, 2.4);
-  const skin = who === "john" ? "#e0a070" : "#e8b888";
-  disc(c, 0, -2, 8.5, skin, 2.2);
-  // hat
+  oval(c, 0, 6, 11, 9, "#6a8a3a", 2.4);
+  disc(c, 0, -2, 8.5, "#e8b888", 2.2);
   const tip = act === "hat" ? -10 - Math.sin(t * 6) * 2 : 0;
   const tilt = act === "hat" ? -0.35 : 0;
   c.save(); c.translate(0, -6 + tip); c.rotate(tilt);
-  if (who === "john") {
-    oval(c, 0, 2, 14, 6, "#4a3010", 2.3);
-    c.beginPath(); rr(c, -6, -6, 12, 8, 2); fillStroke(c, "#3a240c", 2);
-  } else {
-    oval(c, 0, 2, 14, 6, "#d8b04a", 2.3);
-    c.beginPath(); rr(c, -6, -5, 12, 7, 2); fillStroke(c, "#c49028", 2);
+  oval(c, 0, 2, 14, 6, "#d8b04a", 2.3);
+  c.beginPath(); rr(c, -6, -5, 12, 7, 2); fillStroke(c, "#c49028", 2);
+  c.restore();
+  const mad = act === "mean";
+  toonEyes(c, 0, -3, 2.4, blinkAt(t, 31), 0, mad ? 0.4 : 0, mad);
+  const open = talkOpen(t, act === "talk" || act === "sip");
+  toonMouth(c, 0, 3.4, 4.2, act === "sip" ? 0.4 : open, !mad);
+  const sip = act === "sip";
+  c.save();
+  c.translate(sip ? 4 : 10, sip ? -2 : 8);
+  c.rotate(sip ? -0.9 : 0.4);
+  c.beginPath(); rr(c, -5, -4, 9, 8, 2); fillStroke(c, "#c8d0d6", 1.6);
+  c.beginPath(); c.arc(5, 0, 3, -0.8, 0.8); ink(c, 1.6); c.stroke();
+  if (sip) {
+    c.fillStyle = "#5a3a18"; c.globalAlpha = 0.5;
+    c.beginPath(); c.ellipse(0, -6, 3, 2, 0, 0, Math.PI * 2); c.fill();
+    c.globalAlpha = 1;
   }
   c.restore();
-  const mad = who === "joe" && act === "mean";
-  toonEyes(c, 0, -3, 2.4, blinkAt(t, who === "john" ? 30 : 31), 0, mad ? 0.4 : 0, mad);
-  if (who === "john") {
-    // mustache
-    ink(c, 2); c.beginPath(); c.arc(0, 1.5, 3.2, 0.15, Math.PI - 0.15); c.stroke();
-  }
-  const open = talkOpen(t, act === "talk" || act === "hat" || act === "sip");
-  toonMouth(c, 0, 3.4, 4.2, act === "sip" ? 0.4 : open, !mad);
-  if (who === "joe") {
-    const sip = act === "sip";
+  c.restore();
+}
+
+function goldMetal(c: CanvasRenderingContext2D, x0: number, y0: number, x1: number, y1: number): CanvasGradient {
+  const g = c.createLinearGradient(x0, y0, x1, y1);
+  g.addColorStop(0, "#fff4c4");
+  g.addColorStop(0.18, "#f0d060");
+  g.addColorStop(0.45, "#c49218");
+  g.addColorStop(0.72, "#8a6010");
+  g.addColorStop(1, "#e8c850");
+  return g;
+}
+
+function drawGoldChain(c: CanvasRenderingContext2D, cx: number, cy: number, rx: number, ry: number, links: number, t = 0): void {
+  for (let i = 0; i < links; i++) {
+    const a = Math.PI * 0.15 + (i / (links - 1)) * Math.PI * 0.7;
+    const x = cx + Math.cos(a) * rx;
+    const y = cy + Math.sin(a) * ry;
+    const lw = 3.6, lh = 2.4;
     c.save();
-    c.translate(sip ? 4 : 10, sip ? -2 : 8);
-    c.rotate(sip ? -0.9 : 0.4);
-    c.beginPath(); rr(c, -5, -4, 9, 8, 2); fillStroke(c, "#c8d0d6", 1.6);
-    c.beginPath(); c.arc(5, 0, 3, -0.8, 0.8); ink(c, 1.6); c.stroke();
-    if (sip) {
-      c.fillStyle = "#5a3a18"; c.globalAlpha = 0.5;
-      c.beginPath(); c.ellipse(0, -6, 3, 2, 0, 0, Math.PI * 2); c.fill();
-      c.globalAlpha = 1;
-    }
+    c.translate(x, y);
+    c.rotate(a + Math.PI / 2 + (i % 2 ? 0.4 : -0.15));
+    c.fillStyle = goldMetal(c, -lw, -lh, lw, lh);
+    c.beginPath(); c.ellipse(0, 0, lw, lh, 0, 0, Math.PI * 2); c.fill();
+    c.strokeStyle = "rgba(60,36,4,0.65)"; c.lineWidth = 0.6; c.stroke();
+    c.fillStyle = `rgba(255,250,210,${0.7 + Math.sin(t * 2.4 + i) * 0.25})`;
+    c.beginPath(); c.ellipse(-lw * 0.28, -lh * 0.32, lw * 0.38, lh * 0.28, 0, 0, Math.PI * 2); c.fill();
     c.restore();
   }
+}
+
+function drawCigar(c: CanvasRenderingContext2D, x: number, y: number, ang: number, t: number, scale = 1, smoke = true): void {
+  c.save();
+  c.translate(x, y);
+  c.rotate(ang);
+  c.scale(scale, scale);
+  // wrapper
+  const body = c.createLinearGradient(0, -3, 0, 3);
+  body.addColorStop(0, "#c49a62");
+  body.addColorStop(0.4, "#8a5a28");
+  body.addColorStop(1, "#4a2e14");
+  c.fillStyle = body;
+  rr(c, -2, -2.1, 22, 4.2, 1.2); c.fill();
+  // band
+  c.fillStyle = "#7a1c18";
+  c.fillRect(4, -2.2, 2.2, 4.4);
+  c.fillStyle = "#d8b850";
+  c.fillRect(4.5, -2.2, 0.5, 4.4);
+  // ash
+  c.fillStyle = "#c8c0b4";
+  rr(c, 17.5, -1.7, 3.2, 3.4, 0.8); c.fill();
+  // glowing tip
+  const pulse = 0.65 + 0.35 * Math.sin(t * 5.2);
+  const ember = c.createRadialGradient(21.2, 0, 0.2, 21.2, 0, 3.4);
+  ember.addColorStop(0, `rgba(255,240,180,${0.95 * pulse})`);
+  ember.addColorStop(0.35, `rgba(255,110,30,${0.9 * pulse})`);
+  ember.addColorStop(0.7, `rgba(180,30,0,${0.55 * pulse})`);
+  ember.addColorStop(1, "rgba(80,10,0,0)");
+  c.fillStyle = ember;
+  c.beginPath(); c.arc(21.2, 0, 3.4, 0, Math.PI * 2); c.fill();
+  c.restore();
+  if (smoke) {
+    const tipX = x + Math.cos(ang) * 21 * scale;
+    const tipY = y + Math.sin(ang) * 21 * scale;
+    drawCigarSmoke(c, tipX, tipY, t, scale);
+  }
+}
+
+function drawCigarSmoke(c: CanvasRenderingContext2D, x: number, y: number, t: number, scale = 1): void {
+  for (let i = 0; i < 5; i++) {
+    const phase = (t * 0.55 + i * 0.37) % 1.6;
+    const rise = phase * 22 * scale;
+    const drift = Math.sin(t * 1.1 + i * 1.7) * 5 * scale;
+    const w = (2.2 + phase * 5.5) * scale;
+    const a = Math.max(0, 0.42 * (1 - phase / 1.55));
+    c.fillStyle = `rgba(220,216,210,${a})`;
+    c.beginPath();
+    c.ellipse(x + drift, y - 2 * scale - rise, w, w * 1.35, drift * 0.08, 0, Math.PI * 2);
+    c.fill();
+  }
+}
+
+function drawJohnStubble(c: CanvasRenderingContext2D, cx: number, cy: number, rx: number, ry: number): void {
+  c.save();
+  c.beginPath(); c.ellipse(cx, cy + ry * 0.22, rx * 0.96, ry * 0.78, 0, 0, Math.PI * 2); c.clip();
+  for (let i = 0; i < 90; i++) {
+    const u = ((i * 97) % 1000) / 1000;
+    const v = ((i * 53) % 1000) / 1000;
+    const x = cx + (u - 0.5) * rx * 2;
+    const y = cy + 4 + v * ry * 0.85;
+    const dy = (y - cy) / ry;
+    if (dy < 0.08 && Math.abs(x - cx) < rx * 0.3) continue;
+    const shade = 0.12 + (i % 5) * 0.05;
+    c.fillStyle = `rgba(42,26,16,${shade})`;
+    c.fillRect(x, y, i % 4 === 0 ? 1.1 : 0.7, i % 3 === 0 ? 1.1 : 0.6);
+  }
+  c.restore();
+}
+
+function drawJohnEyes(c: CanvasRenderingContext2D, cx: number, cy: number, blink: boolean): void {
+  const eyes: Array<{ x: number; flip: number }> = [{ x: cx - 11.5, flip: -1 }, { x: cx + 11.5, flip: 1 }];
+  for (const e of eyes) {
+    // brow — heavy, serious
+    c.strokeStyle = "#2a1c12"; c.lineWidth = 2.1; c.lineCap = "round";
+    c.beginPath();
+    c.moveTo(e.x + e.flip * 8.5, cy - 8.2);
+    c.quadraticCurveTo(e.x, cy - 10.2, e.x - e.flip * 7.5, cy - 6.4);
+    c.stroke();
+    // socket
+    const sock = c.createRadialGradient(e.x, cy, 1, e.x, cy + 1, 9);
+    sock.addColorStop(0, "rgba(90,50,32,0.05)");
+    sock.addColorStop(1, "rgba(60,32,18,0.28)");
+    c.fillStyle = sock;
+    c.beginPath(); c.ellipse(e.x, cy, 8.4, 5.2, 0, 0, Math.PI * 2); c.fill();
+    if (blink) {
+      c.strokeStyle = "#3a2418"; c.lineWidth = 1.5;
+      c.beginPath();
+      c.moveTo(e.x - 6.5, cy + 0.4);
+      c.quadraticCurveTo(e.x, cy + 1.6, e.x + 6.5, cy + 0.4);
+      c.stroke();
+      c.strokeStyle = "#1a1008"; c.lineWidth = 1.2;
+      c.beginPath();
+      c.moveTo(e.x - 6.5, cy - 0.6);
+      c.quadraticCurveTo(e.x, cy - 1.4, e.x + 6.5, cy - 0.6);
+      c.stroke();
+      continue;
+    }
+    // narrow aperture
+    c.save();
+    c.beginPath(); c.ellipse(e.x, cy, 6.6, 2.55, 0, 0, Math.PI * 2); c.clip();
+    c.fillStyle = "#d8c8b4";
+    c.fillRect(e.x - 7, cy - 4, 14, 8);
+    // steel iris
+    const iris = c.createRadialGradient(e.x + 0.4, cy, 0.4, e.x, cy, 3.1);
+    iris.addColorStop(0, "#c8d0d4");
+    iris.addColorStop(0.35, "#6a7c88");
+    iris.addColorStop(0.75, "#3a4a54");
+    iris.addColorStop(1, "#1a2428");
+    c.fillStyle = iris;
+    c.beginPath(); c.arc(e.x + 0.3, cy + 0.15, 3.05, 0, Math.PI * 2); c.fill();
+    c.fillStyle = "#0c0e10";
+    c.beginPath(); c.arc(e.x + 0.4, cy + 0.15, 1.25, 0, Math.PI * 2); c.fill();
+    c.fillStyle = "rgba(255,255,255,0.7)";
+    c.beginPath(); c.arc(e.x - 0.7, cy - 0.6, 0.7, 0, Math.PI * 2); c.fill();
+    c.restore();
+    // heavy lids
+    c.strokeStyle = "rgba(32,18,10,0.85)"; c.lineWidth = 1.8;
+    c.beginPath();
+    c.moveTo(e.x - 6.8, cy - 1.1);
+    c.quadraticCurveTo(e.x, cy - 3.15, e.x + 6.8, cy - 1.1);
+    c.stroke();
+    c.strokeStyle = "rgba(50,28,16,0.55)"; c.lineWidth = 1;
+    c.beginPath();
+    c.moveTo(e.x - 6.4, cy + 1.9);
+    c.quadraticCurveTo(e.x, cy + 3.0, e.x + 6.4, cy + 1.9);
+    c.stroke();
+  }
+}
+
+function drawJohnPortrait(c: CanvasRenderingContext2D, w: number, h: number, t = 0, talk = false, hatTip = false): void {
+  const bg = c.createLinearGradient(0, 0, 0, h);
+  bg.addColorStop(0, "#2a2218");
+  bg.addColorStop(0.45, "#3a2a1c");
+  bg.addColorStop(1, "#1a120c");
+  c.fillStyle = bg; c.fillRect(0, 0, w, h);
+  // soft barn light
+  const glow = c.createRadialGradient(w * 0.35, h * 0.2, 4, w * 0.45, h * 0.45, w * 0.7);
+  glow.addColorStop(0, "rgba(180,130,60,0.16)");
+  glow.addColorStop(1, "rgba(0,0,0,0)");
+  c.fillStyle = glow; c.fillRect(0, 0, w, h);
+
+  const s = Math.min(w / 132, h / 148);
+  c.save();
+  c.translate(w / 2, h * 0.58);
+  c.scale(s, s);
+
+  const talkAmt = talk ? (0.25 + 0.75 * Math.abs(Math.sin(t * 7.2))) : 0;
+  const jaw = talkAmt * 2.2;
+  const blink = blinkAt(t, 40);
+
+  // ——— duster / denim ———
+  const coat = c.createLinearGradient(-70, 10, 70, 80);
+  coat.addColorStop(0, "#4a3a2c");
+  coat.addColorStop(0.45, "#2c2218");
+  coat.addColorStop(1, "#1a140e");
+  c.fillStyle = coat;
+  c.beginPath();
+  c.moveTo(-72, 86); c.lineTo(-64, 22); c.quadraticCurveTo(-20, 10, 0, 16);
+  c.quadraticCurveTo(20, 10, 64, 22); c.lineTo(72, 86); c.closePath();
+  c.fill();
+  c.strokeStyle = "rgba(10,8,6,0.7)"; c.lineWidth = 1.4; c.stroke();
+  // lapels
+  c.fillStyle = "#3a2c20";
+  c.beginPath(); c.moveTo(-8, 18); c.lineTo(-28, 18); c.lineTo(-18, 48); c.closePath(); c.fill();
+  c.beginPath(); c.moveTo(8, 18); c.lineTo(28, 18); c.lineTo(18, 48); c.closePath(); c.fill();
+  // denim shirt placket
+  const denim = c.createLinearGradient(-10, 20, 10, 70);
+  denim.addColorStop(0, "#4a6490");
+  denim.addColorStop(1, "#2a3c5c");
+  c.fillStyle = denim;
+  c.beginPath(); c.moveTo(-11, 28); c.lineTo(11, 28); c.lineTo(10, 86); c.lineTo(-10, 86); c.closePath(); c.fill();
+  c.strokeStyle = "rgba(200,210,230,0.2)"; c.lineWidth = 0.7;
+  c.beginPath(); c.moveTo(0, 30); c.lineTo(0, 86); c.stroke();
+  // snaps
+  c.fillStyle = "#c8b060";
+  for (const sy of [38, 52, 66]) { c.beginPath(); c.arc(0, sy, 1.3, 0, Math.PI * 2); c.fill(); }
+
+  // bandana
+  const band = c.createLinearGradient(-20, 14, 20, 36);
+  band.addColorStop(0, "#8a2020");
+  band.addColorStop(0.5, "#5a1010");
+  band.addColorStop(1, "#3a0c0c");
+  c.fillStyle = band;
+  c.beginPath();
+  c.moveTo(-22, 20); c.quadraticCurveTo(0, 32, 22, 20); c.quadraticCurveTo(0, 14, -22, 20);
+  c.fill();
+  c.beginPath(); c.moveTo(10, 26); c.lineTo(22, 42); c.lineTo(4, 32); c.closePath(); c.fill();
+
+  // neck
+  const neck = c.createLinearGradient(-10, 8, 10, 26);
+  neck.addColorStop(0, "#c49870");
+  neck.addColorStop(0.5, "#a07048");
+  neck.addColorStop(1, "#7a4c30");
+  c.fillStyle = neck;
+  c.beginPath(); c.ellipse(0, 16, 11, 9, 0, 0, Math.PI * 2); c.fill();
+
+  drawGoldChain(c, 0, 20.5, 19, 12, 11, t);
+  drawGoldChain(c, 0, 24, 15, 8.5, 8, t + 0.6);
+
+  // ——— head ———
+  // ears (behind jaw slightly)
+  const ear = c.createLinearGradient(0, -8, 0, 8);
+  ear.addColorStop(0, "#c49268");
+  ear.addColorStop(1, "#8a5a38");
+  c.fillStyle = ear;
+  c.beginPath(); c.ellipse(-29, -2, 5.2, 8.2, -0.15, 0, Math.PI * 2); c.fill();
+  c.beginPath(); c.ellipse(29, -2, 5.2, 8.2, 0.15, 0, Math.PI * 2); c.fill();
+
+  const face = c.createRadialGradient(-8, -18, 6, 0, 0, 38);
+  face.addColorStop(0, "#f0c49a");
+  face.addColorStop(0.35, "#d4a070");
+  face.addColorStop(0.72, "#b07a50");
+  face.addColorStop(1, "#8a5a38");
+  c.fillStyle = face;
+  c.beginPath(); c.ellipse(0, -4 + jaw * 0.15, 28, 34 + jaw * 0.2, 0, 0, Math.PI * 2); c.fill();
+  // cheek hollows
+  c.fillStyle = "rgba(90,48,28,0.22)";
+  c.beginPath(); c.ellipse(-18, 2, 8, 10, 0.2, 0, Math.PI * 2); c.fill();
+  c.beginPath(); c.ellipse(18, 2, 8, 10, -0.2, 0, Math.PI * 2); c.fill();
+  // under-hat shadow
+  c.fillStyle = "rgba(40,22,12,0.16)";
+  c.beginPath(); c.ellipse(0, -26, 24, 9, 0, 0, Math.PI * 2); c.fill();
+
+  // nose — lean, straight, weathered
+  c.fillStyle = "#b88860";
+  c.beginPath();
+  c.moveTo(-2.2, -16); c.lineTo(-3.6, 2); c.quadraticCurveTo(0, 6, 3.6, 2); c.lineTo(2.2, -16);
+  c.closePath(); c.fill();
+  c.fillStyle = "rgba(255,220,190,0.28)";
+  c.beginPath(); c.moveTo(-0.6, -14); c.lineTo(-1.2, 1); c.lineTo(0.8, 1); c.lineTo(0.8, -14); c.fill();
+  c.fillStyle = "rgba(80,40,24,0.35)";
+  c.beginPath(); c.ellipse(-3.2, 2.4, 1.5, 1.1, 0, 0, Math.PI * 2); c.fill();
+  c.beginPath(); c.ellipse(3.2, 2.4, 1.5, 1.1, 0, 0, Math.PI * 2); c.fill();
+
+  drawJohnStubble(c, 0, 2, 26, 26);
+  drawJohnEyes(c, 0, -14, blink);
+
+  // short weathered mustache
+  c.fillStyle = "rgba(42,28,16,0.85)";
+  c.beginPath(); c.ellipse(-6.5, 8.2, 7.2, 2.4, -0.15, 0, Math.PI * 2); c.fill();
+  c.beginPath(); c.ellipse(6.5, 8.2, 7.2, 2.4, 0.15, 0, Math.PI * 2); c.fill();
+
+  // mouth — set, slight movement opposite the cigar
+  const mx = -3, my = 13.5 + jaw;
+  c.strokeStyle = "#5a3020"; c.lineWidth = 1.3; c.lineCap = "round";
+  c.beginPath();
+  if (talkAmt > 0.35) {
+    c.fillStyle = "#3a1814";
+    c.beginPath(); c.ellipse(mx, my, 5.5, 1.2 + talkAmt * 1.4, 0, 0, Math.PI * 2); c.fill();
+    c.stroke();
+  } else {
+    c.beginPath();
+    c.moveTo(mx - 6, my);
+    c.quadraticCurveTo(mx, my + 1.4, mx + 5, my + 0.2);
+    c.stroke();
+  }
+
+  // cigar in the left corner (viewer's right)
+  const cigarAng = 0.38 + (talkAmt * 0.04) + (hatTip ? -0.03 : 0);
+  drawCigar(c, 11.5, 13.2 + jaw * 0.4, cigarAng, t, 1, true);
+
+  // ——— weathered Stetson ———
+  const tipY = hatTip ? -6 - Math.sin(t * 3.2) * 1.2 : 0;
+  const tipR = hatTip ? -0.11 : 0;
+  c.save();
+  c.translate(0, -30 + tipY);
+  c.rotate(tipR);
+  // brim (wide, sides lifted)
+  const brim = c.createLinearGradient(0, -4, 0, 16);
+  brim.addColorStop(0, "#6a5030");
+  brim.addColorStop(0.45, "#3a2814");
+  brim.addColorStop(1, "#1e140a");
+  c.fillStyle = brim;
+  c.beginPath(); c.ellipse(0, 8, 58, 13, 0, 0, Math.PI * 2); c.fill();
+  c.strokeStyle = "rgba(12,8,4,0.7)"; c.lineWidth = 1.2; c.stroke();
+  // brim underside shadow
+  c.fillStyle = "rgba(20,12,6,0.35)";
+  c.beginPath(); c.ellipse(0, 10, 52, 8, 0, 0, Math.PI); c.fill();
+  // crown
+  const crown = c.createLinearGradient(-20, -28, 24, 8);
+  crown.addColorStop(0, "#5a4228");
+  crown.addColorStop(0.4, "#3a2816");
+  crown.addColorStop(1, "#1c120a");
+  c.fillStyle = crown;
+  c.beginPath();
+  c.moveTo(-22, 4);
+  c.quadraticCurveTo(-24, -22, -8, -28);
+  c.lineTo(8, -28);
+  c.quadraticCurveTo(24, -22, 22, 4);
+  c.closePath(); c.fill();
+  c.strokeStyle = "rgba(12,8,4,0.55)"; c.lineWidth = 1; c.stroke();
+  // cattleman crease
+  c.strokeStyle = "rgba(20,12,6,0.55)"; c.lineWidth = 1.4;
+  c.beginPath(); c.moveTo(0, -27); c.quadraticCurveTo(0, -8, 0, 2); c.stroke();
+  c.strokeStyle = "rgba(200,170,110,0.12)"; c.lineWidth = 1;
+  c.beginPath(); c.moveTo(-12, -20); c.lineTo(-10, 2); c.stroke();
+  // hat band
+  c.fillStyle = "#2a1a0c";
+  c.beginPath(); rr(c, -21, 0, 42, 6, 1); c.fill();
+  c.fillStyle = goldMetal(c, -8, 0, 8, 6);
+  c.beginPath(); rr(c, -5, 0.6, 10, 4.6, 0.8); c.fill();
+  c.fillStyle = "rgba(255,245,200,0.55)";
+  c.fillRect(-3.5, 1.2, 2, 3.2);
+  c.restore();
+
+  c.restore();
+}
+
+function drawJohnWorld(c: CanvasRenderingContext2D, t: number, act: FarmAct = "idle"): void {
+  const bob = Math.sin(t * 1.5) * 0.45;
+  const tip = act === "hat" ? -3.2 - Math.sin(t * 3) * 0.6 : 0;
+  const tipR = act === "hat" ? -0.1 : 0;
+  c.save();
+  c.translate(0, bob);
+  c.scale(1.22, 1.22);
+  shadowBlob(c, 0, 16, 11, 5, 0.32);
+  // boots
+  const boot = c.createLinearGradient(0, 10, 0, 18);
+  boot.addColorStop(0, "#4a2e18"); boot.addColorStop(1, "#1a1008");
+  c.fillStyle = boot;
+  c.beginPath(); c.ellipse(-4.2, 15.2, 3.4, 2.1, -0.2, 0, Math.PI * 2); c.fill();
+  c.beginPath(); c.ellipse(4.2, 15.2, 3.4, 2.1, 0.2, 0, Math.PI * 2); c.fill();
+  // jeans
+  c.fillStyle = "#2a3c58";
+  c.beginPath(); c.moveTo(-5, 7); c.lineTo(-4.5, 14); c.lineTo(-1.2, 14); c.lineTo(-1.5, 7); c.closePath(); c.fill();
+  c.beginPath(); c.moveTo(5, 7); c.lineTo(4.5, 14); c.lineTo(1.2, 14); c.lineTo(1.5, 7); c.closePath(); c.fill();
+  // duster
+  const coat = c.createLinearGradient(-10, -2, 10, 12);
+  coat.addColorStop(0, "#4a3a28"); coat.addColorStop(1, "#24180e");
+  c.fillStyle = coat;
+  c.beginPath();
+  c.moveTo(-9.5, 11); c.lineTo(-8, -1); c.quadraticCurveTo(0, -3, 8, -1); c.lineTo(9.5, 11);
+  c.quadraticCurveTo(0, 13, -9.5, 11);
+  c.closePath(); c.fill();
+  c.strokeStyle = "rgba(10,8,4,0.55)"; c.lineWidth = 0.8; c.stroke();
+  // denim placket
+  c.fillStyle = "#3a5078";
+  c.fillRect(-2, 1, 4, 8);
+  // bandana
+  c.fillStyle = "#6a1414";
+  c.beginPath(); c.ellipse(0, 0.2, 5.2, 2.4, 0, 0, Math.PI * 2); c.fill();
+  // gold chain (tiny but shiny)
+  drawGoldChain(c, 0, 1.2, 5.6, 3.2, 6, t);
+  // head
+  const face = c.createRadialGradient(-1.5, -8, 1, 0, -6, 8);
+  face.addColorStop(0, "#d4a478"); face.addColorStop(1, "#8a5a38");
+  c.fillStyle = face;
+  c.beginPath(); c.ellipse(0, -6.2, 6.2, 7.2, 0, 0, Math.PI * 2); c.fill();
+  // stubble hint
+  c.fillStyle = "rgba(40,24,14,0.4)";
+  c.beginPath(); c.ellipse(0, -3.2, 5, 3.4, 0, 0, Math.PI * 2); c.fill();
+  // squint
+  const blink = blinkAt(t, 30);
+  c.strokeStyle = "#1a120c"; c.lineWidth = 1.05; c.lineCap = "round";
+  if (blink) {
+    c.beginPath(); c.moveTo(-3.6, -7.2); c.lineTo(-1.2, -7.2); c.stroke();
+    c.beginPath(); c.moveTo(1.2, -7.2); c.lineTo(3.6, -7.2); c.stroke();
+  } else {
+    c.beginPath(); c.moveTo(-3.7, -7.4); c.quadraticCurveTo(-2.4, -6.9, -1.1, -7.4); c.stroke();
+    c.beginPath(); c.moveTo(1.1, -7.4); c.quadraticCurveTo(2.4, -6.9, 3.7, -7.4); c.stroke();
+    c.fillStyle = "#3a4a54";
+    c.beginPath(); c.arc(-2.4, -7.2, 0.7, 0, Math.PI * 2); c.fill();
+    c.beginPath(); c.arc(2.4, -7.2, 0.7, 0, Math.PI * 2); c.fill();
+  }
+  // thin mouth
+  c.strokeStyle = "#5a3020"; c.lineWidth = 0.8;
+  c.beginPath(); c.moveTo(-2, -3.1); c.lineTo(1.4, -3.0); c.stroke();
+  // cigar
+  drawCigar(c, 2.2, -3.0, 0.45, t, 0.38, true);
+  // Stetson
+  c.save();
+  c.translate(0, -10.2 + tip);
+  c.rotate(tipR);
+  c.fillStyle = "#2e2012";
+  c.beginPath(); c.ellipse(0, 2.4, 11.2, 3.1, 0, 0, Math.PI * 2); c.fill();
+  const crown = c.createLinearGradient(-4, -6, 5, 3);
+  crown.addColorStop(0, "#5a4030"); crown.addColorStop(1, "#24160c");
+  c.fillStyle = crown;
+  c.beginPath();
+  c.moveTo(-5.4, 2); c.quadraticCurveTo(-5.8, -5.2, 0, -6.2); c.quadraticCurveTo(5.8, -5.2, 5.4, 2);
+  c.closePath(); c.fill();
+  c.fillStyle = "#1a1008";
+  c.fillRect(-5.2, 0.6, 10.4, 1.5);
+  c.fillStyle = goldMetal(c, -2, 0.6, 2, 2);
+  c.fillRect(-1.6, 0.7, 3.2, 1.3);
+  c.restore();
   c.restore();
 }
 
@@ -1331,33 +1734,6 @@ function portraitBg(c: CanvasRenderingContext2D, w: number, h: number, mean = fa
   if (mean) { g.addColorStop(0, "#4a2030"); g.addColorStop(1, "#1a0c10"); }
   else { g.addColorStop(0, "#5a9a48"); g.addColorStop(1, "#c4a060"); }
   c.fillStyle = g; c.fillRect(0, 0, w, h);
-}
-
-function drawJohnPortrait(c: CanvasRenderingContext2D, w: number, h: number, t = 0, talk = false, hatTip = false): void {
-  portraitBg(c, w, h, false);
-  const cx = w * 0.5, cy = h * 0.58;
-  // shoulders
-  c.beginPath(); rr(c, cx - 58, cy + 28, 116, 70, 16); fillStroke(c, "#3a6aaa", 3);
-  c.beginPath(); rr(c, cx - 14, cy + 20, 28, 40, 6); fillStroke(c, "#c43c2c", 2.4); // bandana
-  // neck + head
-  oval(c, cx, cy + 16, 16, 12, "#e0a070", 2);
-  disc(c, cx, cy - 6, 36, "#e0a070", 3);
-  // ears
-  disc(c, cx - 34, cy, 8, "#e0a070", 2);
-  disc(c, cx + 34, cy, 8, "#e0a070", 2);
-  const tipY = hatTip ? -18 - Math.sin(t * 7) * 3 : 0;
-  const tipR = hatTip ? -0.28 : 0;
-  c.save(); c.translate(cx, cy - 34 + tipY); c.rotate(tipR);
-  oval(c, 0, 10, 58, 14, "#4a3010", 3);
-  c.beginPath(); rr(c, -28, -22, 56, 32, 8); fillStroke(c, "#3a240c", 3);
-  c.beginPath(); rr(c, -22, 4, 44, 8, 2); fillStroke(c, "#c43c2c", 2);
-  c.restore();
-  toonEyes(c, cx, cy - 10, 9, blinkAt(t, 40), talk ? Math.sin(t * 2) * 0.2 : 0, 0.1, false);
-  // mustache
-  c.fillStyle = "#5a3a18";
-  c.beginPath(); c.ellipse(cx - 12, cy + 8, 14, 6, -0.2, 0, Math.PI * 2); c.fill(); ink(c, 2); c.stroke();
-  c.beginPath(); c.ellipse(cx + 12, cy + 8, 14, 6, 0.2, 0, Math.PI * 2); c.fill(); c.stroke();
-  toonMouth(c, cx, cy + 20, 16, talkOpen(t, talk), true);
 }
 
 function drawJoePortrait(c: CanvasRenderingContext2D, w: number, h: number, mean = false, t = 0, talk = false, sip = false): void {
