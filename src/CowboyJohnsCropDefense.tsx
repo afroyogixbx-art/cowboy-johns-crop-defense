@@ -52,7 +52,7 @@ interface Cutscene { kind: "betrayal"; t: number; phase: 0 | 1 | 2 }
 interface SaveData {
   v: 1; mapId: string; wave: number; cash: number; lives: number; maxLives: number; won40: boolean;
   towers: { kind: TowerId; x: number; y: number; a: number; b: number; tgt: TargetMode; charges: number; spent: number }[];
-  seen: EnemyId[]; revealed?: boolean; freeUsed?: boolean;
+  seen: EnemyId[]; revealed?: boolean; freeUsed?: boolean; speed?: number;
 }
 interface Sim {
   screen: Screen; mapId: string; wave: number; waving: boolean; cash: number; lives: number; maxLives: number;
@@ -377,7 +377,7 @@ function simToSave(s: Sim): SaveData {
   return {
     v: 1, mapId: s.mapId, wave: s.wave, cash: s.cash, lives: s.lives, maxLives: s.maxLives, won40: s.won40,
     towers: s.towers.map((t) => ({ kind: t.kind, x: t.x, y: t.y, a: t.a, b: t.b, tgt: t.tgt, charges: t.charges, spent: t.spent })),
-    seen: s.seen.slice(), revealed: s.revealed, freeUsed: s.freeUsed,
+    seen: s.seen.slice(), revealed: s.revealed, freeUsed: s.freeUsed, speed: s.speed,
   };
 }
 function exportCodeFrom(data: SaveData): string {
@@ -411,6 +411,45 @@ function loadSaved(): SaveData | null {
   if (!raw) return null;
   return parseCode(raw);
 }
+
+const SETTINGS_KEY = "cjcd-settings-v1";
+type SpeedX = 1 | 2 | 4;
+type Settings = { speed: SpeedX; hd: boolean };
+function normSpeed(n: unknown): SpeedX { return n === 4 || n === 2 ? n : 1; }
+function loadSettings(): Settings {
+  const d: Settings = { speed: 1, hd: true };
+  try {
+    const raw = kvGet(SETTINGS_KEY);
+    if (!raw) return d;
+    const j: unknown = JSON.parse(raw);
+    if (j && typeof j === "object") {
+      const o = j as { speed?: unknown; hd?: unknown };
+      d.speed = normSpeed(o.speed);
+      if (typeof o.hd === "boolean") d.hd = o.hd;
+    }
+  } catch { /* ignore */ }
+  return d;
+}
+const SETTINGS: Settings = loadSettings();
+function saveSettings(): void {
+  try { kvSet(SETTINGS_KEY, JSON.stringify(SETTINGS)); } catch { /* ignore */ }
+}
+function cycleSpeed(cur: number): SpeedX { return cur === 1 ? 2 : cur === 2 ? 4 : 1; }
+function setSpeedPref(n: number): SpeedX {
+  SETTINGS.speed = normSpeed(n);
+  saveSettings();
+  return SETTINGS.speed;
+}
+function spriteScale(): number {
+  // HD: prerender grass & bugs at 2× (dpr-or-2x-min, capped for perf). Off: original 1× caches.
+  if (!SETTINGS.hd) return 1;
+  return 2;
+}
+function playDpr(): number {
+  const dpr = typeof window !== "undefined" ? (window.devicePixelRatio || 1) : 1;
+  return Math.min(1.5, dpr);
+}
+
 
 /* ---------- waves ---------- */
 function scaleHp(base: number, wave: number): number {
@@ -2162,31 +2201,68 @@ function drawBetrayalSwarm(c: CanvasRenderingContext2D, t: number): void {
   }
 }
 
-const SPR: { farm?: HTMLCanvasElement; plant: HTMLCanvasElement[]; enemy: Partial<Record<EnemyId, HTMLCanvasElement[]>> } = { plant: [], enemy: {} };
+const SPR: {
+  farm?: HTMLCanvasElement; plant: HTMLCanvasElement[]; enemy: Partial<Record<EnemyId, HTMLCanvasElement[]>>;
+  scale: number; hd: boolean;
+} = { plant: [], enemy: {}, scale: 0, hd: true };
+let FARM_PRESENT: { img: HTMLCanvasElement; dw: number; dh: number; src: HTMLCanvasElement } | null = null;
+let SPR_PRESENT: { destE: number; destP: number; plant: HTMLCanvasElement[]; enemy: Partial<Record<EnemyId, HTMLCanvasElement[]>> } | null = null;
+function downscaleC(src: HTMLCanvasElement, w: number, h: number): HTMLCanvasElement {
+  const c = makeC(w, h);
+  const x = c.getContext("2d");
+  if (x) { prepCtx(x, true); x.drawImage(src, 0, 0, w, h); }
+  return c;
+}
 function makeC(w: number, h: number): HTMLCanvasElement {
   const c = document.createElement("canvas"); c.width = w; c.height = h; return c;
 }
-function ensureSprites(): void {
-  if (SPR.farm) return;
-  const farm = makeC(WW, WH);
+function prepCtx(c: CanvasRenderingContext2D, smooth: boolean): void {
+  c.imageSmoothingEnabled = smooth;
+  try { c.imageSmoothingQuality = "high"; } catch { /* ignore */ }
+}
+function ensureSprites(force = false): void {
+  const hd = SETTINGS.hd;
+  const scale = spriteScale();
+  if (!force && SPR.farm && SPR.hd === hd && SPR.scale === scale) return;
+  SPR.farm = undefined;
+  SPR.plant = [];
+  SPR.enemy = {};
+  SPR.hd = hd;
+  SPR.scale = scale;
+  FARM_PRESENT = null;
+  SPR_PRESENT = null;
+  const farm = makeC(Math.round(WW * scale), Math.round(WH * scale));
   const fc = farm.getContext("2d");
-  if (fc) { fc.imageSmoothingEnabled = true; drawFarmBg(fc); drawCropLayer(fc, 1); }
+  if (fc) {
+    prepCtx(fc, true);
+    fc.scale(scale, scale);
+    drawFarmBg(fc);
+    drawCropLayer(fc, 1);
+  }
   SPR.farm = farm;
   for (let i = 0; i < 5; i++) {
-    const p = makeC(140, 140);
+    const p = makeC(Math.round(140 * scale), Math.round(140 * scale));
     const pc = p.getContext("2d");
-    if (pc) { pc.imageSmoothingEnabled = true; pc.translate(70, 70); drawPlant(pc, i / 4, 0); }
+    if (pc) {
+      prepCtx(pc, true);
+      pc.scale(scale, scale);
+      pc.translate(70, 70);
+      drawPlant(pc, i / 4, 0);
+    }
     SPR.plant.push(p);
   }
+  const eFrames = hd ? 8 : 5;
+  const eSize = 96;
   for (const kind of EIDS) {
     const frames: HTMLCanvasElement[] = [];
-    for (let f = 0; f < 5; f++) {
-      const p = makeC(96, 96);
+    for (let f = 0; f < eFrames; f++) {
+      const p = makeC(Math.round(eSize * scale), Math.round(eSize * scale));
       const pc = p.getContext("2d");
       if (pc) {
-        pc.imageSmoothingEnabled = true;
-        pc.translate(48, 48);
-        drawEnemySprite(pc, kind, f * 0.18, false);
+        prepCtx(pc, true);
+        pc.scale(scale, scale);
+        pc.translate(eSize / 2, eSize / 2);
+        drawEnemySprite(pc, kind, f * (hd ? 0.14 : 0.18), false);
       }
       frames.push(p);
     }
@@ -2737,6 +2813,7 @@ function skipCutscene(s: Sim): void {
   }
 }
 
+const SIM_STEP = 1 / 48;
 function step(s: Sim, dt: number): void {
   if (s.screen !== "play" || s.over) return;
   if (s.cut) {
@@ -2749,7 +2826,17 @@ function step(s: Sim, dt: number): void {
     }
     return;
   }
-  const t = Math.min(0.05, dt) * s.speed;
+  // Sub-step so 4× speed doesn't let shots or pests tunnel through collisions.
+  const budget = Math.min(0.05, dt) * normSpeed(s.speed);
+  let left = budget;
+  while (left > 1e-6) {
+    const t = Math.min(SIM_STEP, left);
+    left -= t;
+    stepOnce(s, t);
+    if (s.screen !== "play" || s.over || s.cut) break;
+  }
+}
+function stepOnce(s: Sim, t: number): void {
   s.time += t;
   s.shake = Math.max(0, s.shake - t);
   if (s.john && !s.john.modal) {
@@ -2837,7 +2924,7 @@ function sellTower(s: Sim, tw: Tower): void {
 function freshSim(): Sim {
   const s: Sim = {
     screen: "play", mapId: MAP_ID, wave: 1, waving: false, cash: START_CASH, lives: START_LIVES, maxLives: START_LIVES,
-    speed: 1, towers: [], enemies: [], shots: [], planes: [], floats: [], fx: [], spawnQ: [], waveT: 0,
+    speed: SETTINGS.speed, towers: [], enemies: [], shots: [], planes: [], floats: [], fx: [], spawnQ: [], waveT: 0,
     selected: null, placing: null, hover: null, john: null, intro: true, won40: false, time: 0, uid: 1,
     seen: [], dirty: false, over: false, pendingEnd: 0, shake: 0,
     revealed: false, joeHere: true, johnHere: true, freeUsed: false, cut: null,
@@ -2873,6 +2960,8 @@ function applySave(d: SaveData): Sim {
   s.cut = null;
   if (d.freeUsed !== undefined) s.freeUsed = !!d.freeUsed;
   else s.freeUsed = d.towers.length > 0 || d.cash > 0 || d.wave > 1;
+  s.speed = d.speed === 2 || d.speed === 4 || d.speed === 1 ? normSpeed(d.speed) : SETTINGS.speed;
+  setSpeedPref(s.speed);
   s.screen = "play";
   return s;
 }
@@ -2898,8 +2987,36 @@ function drawFrame(c: CanvasRenderingContext2D, s: Sim, cssW: number, cssH: numb
   const shx = (s.shake ? (Math.random() - 0.5) * 10 * s.shake : 0);
   const shy = (s.shake ? (Math.random() - 0.5) * 8 * s.shake : 0);
   c.setTransform(dpr * scale, 0, 0, dpr * scale, dpr * (ox + shx), dpr * (oy + shy));
-  c.imageSmoothingEnabled = false;
-  if (SPR.farm) c.drawImage(SPR.farm, 0, 0);
+  // Prefer a 1:1 present blit of the (possibly 2×) farm so we don't pay a high-quality
+  // downscale of a 2000×1600 layer every frame.
+  if (SPR.farm) {
+    const dw = Math.max(1, Math.round(WW * scale * dpr));
+    const dh = Math.max(1, Math.round(WH * scale * dpr));
+    if (SETTINGS.hd) {
+      if (!FARM_PRESENT || FARM_PRESENT.dw !== dw || FARM_PRESENT.dh !== dh || FARM_PRESENT.src !== SPR.farm) {
+        const tmp = makeC(dw, dh);
+        const tc = tmp.getContext("2d");
+        if (tc) {
+          prepCtx(tc, true);
+          tc.drawImage(SPR.farm, 0, 0, dw, dh);
+        }
+        FARM_PRESENT = { img: tmp, dw, dh, src: SPR.farm };
+      }
+      c.setTransform(1, 0, 0, 1, 0, 0);
+      c.imageSmoothingEnabled = false;
+      c.drawImage(FARM_PRESENT.img, dpr * (ox + shx), dpr * (oy + shy));
+      c.setTransform(dpr * scale, 0, 0, dpr * scale, dpr * (ox + shx), dpr * (oy + shy));
+    } else {
+      c.imageSmoothingEnabled = false;
+      c.drawImage(SPR.farm, 0, 0, WW, WH);
+    }
+  }
+  if (SETTINGS.hd) {
+    c.imageSmoothingEnabled = true;
+    try { c.imageSmoothingQuality = "high"; } catch { /* ignore */ }
+  } else {
+    c.imageSmoothingEnabled = false;
+  }
   // a handful of live swaying tufts (cheap); the field itself is prerendered
   drawCropTuft(c, 200, 330, s.time * 2.2, "#4cd05a");
   drawCropTuft(c, 360, 480, s.time * 2.2 + 1, "#2f9a32");
@@ -2910,13 +3027,26 @@ function drawFrame(c: CanvasRenderingContext2D, s: Sim, cssW: number, cssH: numb
   drawPondShimmer(c, s.time);
   drawClouds(c, s.time);
   if (s.cut && s.cut.kind === "betrayal") drawBetrayalSwarm(c, s.cut.t + (s.cut.phase > 0 ? 2.8 : 0));
+  if (SETTINGS.hd) {
+    const destE = Math.max(1, Math.round(96 * scale * dpr));
+    const destP = Math.max(1, Math.round(140 * scale * dpr));
+    if (!SPR_PRESENT || SPR_PRESENT.destE !== destE || SPR_PRESENT.destP !== destP) {
+      const enemy: Partial<Record<EnemyId, HTMLCanvasElement[]>> = {};
+      for (const kind of EIDS) {
+        const frames = SPR.enemy[kind] || [];
+        enemy[kind] = frames.map((fr) => downscaleC(fr, destE, destE));
+      }
+      SPR_PRESENT = { destE, destP, plant: SPR.plant.map((p) => downscaleC(p, destP, destP)), enemy };
+    }
+    c.imageSmoothingEnabled = false;
+  }
   // plant
   const wilt = 1 - clamp(s.lives / Math.max(1, s.maxLives), 0, 1);
-  const pfr = SPR.plant[clamp(Math.floor(wilt * 4.999), 0, 4)];
+  const pfr = (SPR_PRESENT ? SPR_PRESENT.plant : SPR.plant)[clamp(Math.floor(wilt * 4.999), 0, 4)];
   c.save();
   c.translate(PLANT.x, PLANT.y);
   c.rotate(Math.sin(s.time * 1.6) * 0.14 * (1 - wilt * 0.45));
-  if (pfr) c.drawImage(pfr, -70, -70);
+  if (pfr) c.drawImage(pfr, -70, -70, 140, 140);
   else drawPlant(c, wilt, s.time);
   c.restore();
   // hired help
@@ -2962,9 +3092,9 @@ function drawFrame(c: CanvasRenderingContext2D, s: Sim, cssW: number, cssH: numb
     c.translate(e.x, e.y);
     c.rotate(e.ang);
     if (e.flying) c.translate(0, Math.sin(s.time * 10 + e.id) * -3);
-    const frames = SPR.enemy[e.kind];
+    const frames = (SPR_PRESENT && SPR_PRESENT.enemy[e.kind]) || SPR.enemy[e.kind];
     const fr = frames ? frames[Math.floor(s.time * 10 + e.id) % frames.length] : null;
-    if (fr) c.drawImage(fr, -48, -48);
+    if (fr) c.drawImage(fr, -48, -48, 96, 96);
     else drawEnemySprite(c, e.kind, s.time + e.id * 0.2, e.hitT > 0);
     c.restore();
     if (e.hitT > 0) { c.fillStyle = "rgba(255,255,255,0.4)"; ellipse(c, e.x, e.y, e.r + 3, e.r + 2); c.fill(); }
@@ -3048,17 +3178,17 @@ type Hud = {
   screen: Screen; cash: number; lives: number; maxLives: number; wave: number; waving: boolean; speed: number;
   placing: TowerId | null; selected: number | null; john: JohnMsg | null; intro: boolean; won40: boolean;
   over: boolean; toast: string; exitAsk: boolean; exitScreen: boolean; saveOpen: boolean; confirmNew: boolean; hasSave: boolean;
-  codeMsg: string; showingHelp: boolean; freeUsed: boolean; cut: Cutscene | null;
+  codeMsg: string; showingHelp: boolean; freeUsed: boolean; cut: Cutscene | null; hd: boolean;
 };
 
 const INIT_HUD: Hud = {
   screen: "title", cash: 0, lives: 0, maxLives: START_LIVES, wave: 1, waving: false, speed: 1,
   placing: null, selected: null, john: null, intro: false, won40: false, over: false, toast: "",
-  exitAsk: false, exitScreen: false, saveOpen: false, confirmNew: false, hasSave: false, codeMsg: "", showingHelp: false, freeUsed: false, cut: null,
+  exitAsk: false, exitScreen: false, saveOpen: false, confirmNew: false, hasSave: false, codeMsg: "", showingHelp: false, freeUsed: false, cut: null, hd: SETTINGS.hd,
 };
 
 function snapHud(s: Sim | null, extra: Partial<Hud> = {}): Hud {
-  const base: Hud = { ...INIT_HUD, hasSave: !!loadSaved(), ...extra };
+  const base: Hud = { ...INIT_HUD, hasSave: !!loadSaved(), hd: SETTINGS.hd, ...extra };
   if (!s) return { ...base, screen: extra.screen ?? "title", showingHelp: extra.showingHelp === true || extra.screen === "help" };
   return {
     ...base,
@@ -3116,13 +3246,13 @@ export default function CowboyJohnsCropDefense() {
   const johnCv = useRef<HTMLCanvasElement>(null);
   const sim = useRef<Sim | null>(null);
   const view = useRef({ scale: 1, ox: 0, oy: 0 });
-  const [hud, setHud] = useState<Hud>(() => ({ ...INIT_HUD, hasSave: !!loadSaved() }));
+  const [hud, setHud] = useState<Hud>(() => ({ ...INIT_HUD, hasSave: !!loadSaved(), hd: SETTINGS.hd }));
   const [vp, setVp] = useState({ w: typeof window !== "undefined" ? window.innerWidth : 390, h: typeof window !== "undefined" ? window.innerHeight : 844 });
   const [paste, setPaste] = useState("");
   const hudRef = useRef(hud);
   hudRef.current = hud;
   const bump = useCallback((extra: Partial<Hud> = {}): void => {
-    setHud((h) => snapHud(sim.current, { ...h, toast: extra.toast ?? h.toast, exitAsk: extra.exitAsk ?? h.exitAsk, exitScreen: extra.exitScreen ?? h.exitScreen, saveOpen: extra.saveOpen ?? h.saveOpen, confirmNew: extra.confirmNew ?? h.confirmNew, codeMsg: extra.codeMsg ?? h.codeMsg, showingHelp: extra.showingHelp ?? h.showingHelp, hasSave: !!loadSaved(), ...extra }));
+    setHud((h) => snapHud(sim.current, { ...h, toast: extra.toast ?? h.toast, exitAsk: extra.exitAsk ?? h.exitAsk, exitScreen: extra.exitScreen ?? h.exitScreen, saveOpen: extra.saveOpen ?? h.saveOpen, confirmNew: extra.confirmNew ?? h.confirmNew, codeMsg: extra.codeMsg ?? h.codeMsg, showingHelp: extra.showingHelp ?? h.showingHelp, hd: extra.hd ?? h.hd, hasSave: !!loadSaved(), ...extra }));
   }, []);
   const toast = useCallback((t: string): void => { bump({ toast: t }); window.setTimeout(() => { setHud((h) => h.toast === t ? { ...h, toast: "" } : h); }, 2400); }, [bump]);
 
@@ -3175,7 +3305,7 @@ export default function CowboyJohnsCropDefense() {
         if (s.screen === "play") step(s, dt);
         if (cv) {
           const r = cv.getBoundingClientRect();
-          const dpr = Math.min(1.5, window.devicePixelRatio || 1);
+          const dpr = playDpr();
           const w = Math.max(1, r.width), h = Math.max(1, r.height);
           if (cv.width !== Math.floor(w * dpr) || cv.height !== Math.floor(h * dpr)) { cv.width = Math.floor(w * dpr); cv.height = Math.floor(h * dpr); }
           const ctx = cv.getContext("2d");
@@ -3193,7 +3323,7 @@ export default function CowboyJohnsCropDefense() {
         }
       } else if (cv) {
         const r = cv.getBoundingClientRect();
-        const dpr = Math.min(1.5, window.devicePixelRatio || 1);
+        const dpr = playDpr();
         const w = Math.max(1, r.width), h = Math.max(1, r.height);
         if (cv.width !== Math.floor(w * dpr) || cv.height !== Math.floor(h * dpr)) { cv.width = Math.floor(w * dpr); cv.height = Math.floor(h * dpr); }
         const ctx = cv.getContext("2d");
@@ -3250,7 +3380,7 @@ export default function CowboyJohnsCropDefense() {
     flush();
     sim.current = null;
     bump({ screen: "title", exitAsk: false, exitScreen: false, saveOpen: false, confirmNew: false });
-    setHud((h) => ({ ...INIT_HUD, hasSave: !!loadSaved(), toast: h.toast }));
+    setHud((h) => ({ ...INIT_HUD, hasSave: !!loadSaved(), hd: SETTINGS.hd, toast: h.toast }));
   }, [flush, bump]);
 
   const backToMenu = useCallback((): void => {
@@ -3258,7 +3388,7 @@ export default function CowboyJohnsCropDefense() {
     try { trapBack(); } catch { /* ignore */ }
     flush();
     sim.current = null;
-    setHud((h) => ({ ...INIT_HUD, hasSave: !!loadSaved(), toast: h.toast, exitScreen: false, exitAsk: false }));
+    setHud((h) => ({ ...INIT_HUD, hasSave: !!loadSaved(), hd: SETTINGS.hd, toast: h.toast, exitScreen: false, exitAsk: false }));
   }, [flush]);
 
   const leaveNow = useCallback((): void => {
@@ -3336,7 +3466,7 @@ export default function CowboyJohnsCropDefense() {
         return;
       }
       if (e.key === " " || e.code === "Space") { e.preventDefault(); if (!s.waving) { startWave(s); bump(); } return; }
-      if (e.key === "f" || e.key === "F") { s.speed = s.speed === 1 ? 2 : 1; bump(); return; }
+      if (e.key === "f" || e.key === "F") { s.speed = setSpeedPref(cycleSpeed(s.speed)); persist(s); bump(); return; }
       if (e.key === "x" || e.key === "X" || e.key === "Sell" || e.key === "s" && e.shiftKey) {
         const tw = s.towers.find((t) => t.id === s.selected);
         if (tw) { sellTower(s, tw); bump(); }
@@ -3378,6 +3508,7 @@ export default function CowboyJohnsCropDefense() {
       place: (id: string, x: number, y: number) => string;
       startWave: () => boolean;
       speed: (n: number) => void;
+      hd: (on: boolean) => void;
       leak: (n?: number) => void;
       save: () => string;
       load: (code: string) => string;
@@ -3408,7 +3539,8 @@ export default function CowboyJohnsCropDefense() {
         return tw ? "ok" : "fail";
       },
       startWave: () => { const s = sim.current; if (!s) return false; const ok = startWave(s); bump(); return ok; },
-      speed: (n: number) => { const s = sim.current; if (s) { s.speed = Math.max(0.25, n); bump(); } },
+      speed: (n: number) => { const s = sim.current; if (s) { s.speed = setSpeedPref(n); bump(); } },
+      hd: (on: boolean) => { SETTINGS.hd = !!on; saveSettings(); ensureSprites(true); bump({ hd: SETTINGS.hd }); },
       leak: (n?: number) => { const s = sim.current; if (!s) return; const e = spawnEnemy(s, "mite", PLEN - 4); if (n && n > 1) e.leak = n; bump(); },
       save: () => { const s = sim.current; if (!s) return ""; persist(s); return exportCodeFrom(simToSave(s)); },
       load: (code: string) => { const d = parseCode(code); if (!d) return "bad"; sim.current = applySave(d); bump(); return "ok"; },
@@ -3516,7 +3648,7 @@ export default function CowboyJohnsCropDefense() {
       <div style={{ fontWeight: 800, fontSize: 16, color: t.text.warning }} data-testid="cash">${hud.cash}</div>
       <div style={{ fontWeight: 800, fontSize: 16, color: hud.lives < 30 ? t.text.danger : t.text.success }} data-testid="lives">🌿 {hud.lives}/{hud.maxLives}</div>
       <div style={{ fontWeight: 700, fontSize: 14, color: t.text.secondary, flex: 1 }} data-testid="wave">Wave {hud.wave}{hud.wave > MAX_WAVE ? " · Freeplay" : ""}{hud.waving ? " · INCOMING" : ""}</div>
-      {btn(hud.speed === 1 ? "2×" : "1×", () => { const s = sim.current; if (s) { s.speed = s.speed === 1 ? 2 : 1; bump(); } }, { test: "speed", small: true })}
+      {btn(hud.speed === 1 ? "1×" : hud.speed === 2 ? "2×" : "4×", () => { const s = sim.current; if (s) { s.speed = setSpeedPref(cycleSpeed(s.speed)); if (s.screen !== "defeat") persist(s); bump(); } }, { test: "speed", small: true })}
       {btn(hud.waving ? "Wave running" : "Start Wave", () => { const s = sim.current; if (s && s.screen === "play") { startWave(s); bump(); } }, { tone: "pri", test: "start-wave", disabled: hud.waving || hud.screen !== "play" || !!hud.cut, small: true })}
       {btn("Menu", () => { const s = sim.current; if (s && (s.screen === "play" || s.screen === "paused")) { s.screen = s.screen === "paused" ? "play" : "paused"; bump(); } }, { test: "menu", small: true })}
     </div>
@@ -3657,6 +3789,16 @@ export default function CowboyJohnsCropDefense() {
             {btn("Resume", () => { const s = sim.current; if (s) s.screen = "play"; bump(); }, { tone: "pri", grow: true, test: "resume" })}
             {btn("How to Play", () => { const s = sim.current; if (s && s.screen === "play") s.screen = "paused"; bump({ showingHelp: true }); }, { grow: true, test: "help-from-pause" })}
             {btn("Save code", () => bump({ saveOpen: true }), { grow: true, test: "save-from-pause" })}
+            {btn(hud.hd ? "HD visuals: On" : "HD visuals: Off", () => {
+              SETTINGS.hd = !SETTINGS.hd;
+              saveSettings();
+              ensureSprites(true);
+              bump({ hd: SETTINGS.hd });
+            }, { grow: true, test: "hd-toggle-pause" })}
+            <a href="./classic/" data-testid="classic-link-pause" style={{
+              display: "block", textAlign: "center", fontSize: 13, fontWeight: 700,
+              color: t.text.secondary, textDecoration: "underline", cursor: "pointer", padding: 6,
+            }}>Play classic version</a>
             {btn("Title screen", () => goTitle(), { grow: true, test: "to-title" })}
             {btn("Quit farm", () => bump({ exitAsk: true }), { tone: "danger", grow: true, test: "quit-farm" })}
           </div>
@@ -3691,7 +3833,7 @@ export default function CowboyJohnsCropDefense() {
         <h2 style={{ margin: 0, fontSize: 22, color: t.text.accent, flex: 1 }}>How to Play</h2>
         {btn("Back", () => {
           if (sim.current) bump({ showingHelp: false });
-          else setHud((h) => ({ ...INIT_HUD, hasSave: !!loadSaved(), showingHelp: false, screen: "title" }));
+          else setHud((h) => ({ ...INIT_HUD, hasSave: !!loadSaved(), hd: SETTINGS.hd, showingHelp: false, screen: "title" }));
         }, { tone: "pri", test: "help-back", small: true })}
       </div>
       <p>You're hired help on Cowboy John's hemp farm. Pests march the dirt path toward his plant. Place towers beside the path and don't let the crop wilt. Lives are the plant's health — it droops as it takes hits. John stops by with tips, and other hands on the farm have a routine of their own. There's no forced tutorial.</p>
@@ -3712,11 +3854,11 @@ export default function CowboyJohnsCropDefense() {
         <li>Something worse may be waiting at the end of South Field.</li>
       </ul>
       <h3 style={{ color: t.text.warning, fontSize: 16 }}>Waves</h3>
-      <p>40 waves on South Field, then freeplay. Press <b>Start Wave</b> or Space when you're ready. Use 2× (or F) when you trust the line. There's room later for more plants and maps.</p>
+      <p>40 waves on South Field, then freeplay. Press <b>Start Wave</b> or Space when you're ready. Use 1× / 2× / 4× (or F) when you trust the line. There's room later for more plants and maps.</p>
       <h3 style={{ color: t.text.warning, fontSize: 16 }}>Saving</h3>
       <p>The farm autosaves between waves on this device. Copy a save code from the menu if you want a backup or to move to another phone.</p>
       <h3 style={{ color: t.text.warning, fontSize: 16 }}>Keys</h3>
-      <p>1–8 select towers, Space starts a wave, F toggles 2×, Q / E upgrade path A / B, T cycles targeting, X or Shift+S sells, Esc pauses or backs out. The phone back button asks before leaving.</p>
+      <p>1–8 select towers, Space starts a wave, F cycles 1× / 2× / 4×, Q / E upgrade path A / B, T cycles targeting, X or Shift+S sells, Esc pauses or backs out. The phone back button asks before leaving.</p>
 
     </div>
   );
@@ -3737,6 +3879,17 @@ export default function CowboyJohnsCropDefense() {
           {btn("How to Play", () => setHud((h) => ({ ...h, screen: "help", showingHelp: true })), { grow: true, test: "how-to-play" })}
           {btn("Paste save code", () => bump({ saveOpen: true }), { grow: true, test: "paste-save" })}
           {btn("Exit", leaveNow, { tone: "danger", grow: true, test: "exit" })}
+          {btn(hud.hd ? "HD visuals: On" : "HD visuals: Off", () => {
+            SETTINGS.hd = !SETTINGS.hd;
+            saveSettings();
+            ensureSprites(true);
+            bump({ hd: SETTINGS.hd });
+          }, { small: true, grow: true, test: "hd-toggle" })}
+          <a href="./classic/" data-testid="classic-link" style={{
+            display: "block", textAlign: "center", marginTop: 4, fontSize: 13, fontWeight: 700,
+            color: t.text.secondary, textDecoration: "underline", cursor: "pointer", padding: 8,
+            WebkitTapHighlightColor: "transparent",
+          }}>Play classic version</a>
         </div>
         {hud.confirmNew && (
           <div style={{ marginTop: 12, width: "min(360px, 100%)", background: t.bg.elevated, border: `1px solid ${t.border.default}`, borderRadius: 12, padding: 12 }}>
