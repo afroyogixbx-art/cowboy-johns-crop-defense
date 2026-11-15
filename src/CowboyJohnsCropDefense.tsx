@@ -1535,42 +1535,74 @@ function goldMetal(c: CanvasRenderingContext2D, x0: number, y0: number, x1: numb
 
 function drawGoldChain(c: CanvasRenderingContext2D, cx: number, neckY: number, chestY: number, halfW: number, t = 0, scale = 1): void {
   const s = scale;
-  const n = Math.max(10, Math.round((halfW * 2 + (chestY - neckY) * 2) / (4.2 * s)));
-  const pts: Array<{ x: number; y: number; ang: number }> = [];
-  for (let i = 0; i <= n; i++) {
-    const u = i / n;
-    const x = cx + Math.cos(Math.PI + u * Math.PI) * halfW;
-    const y = neckY + Math.pow(Math.sin(u * Math.PI), 1.15) * (chestY - neckY);
-    pts.push({ x, y, ang: 0 });
+  const samples: Array<{ x: number; y: number }> = [];
+  const N = 80;
+  for (let i = 0; i <= N; i++) {
+    const u = i / N;
+    samples.push({
+      x: cx + Math.cos(Math.PI + u * Math.PI) * halfW,
+      y: neckY + Math.pow(Math.sin(u * Math.PI), 1.12) * (chestY - neckY),
+    });
   }
+  const dist = [0];
+  for (let i = 1; i <= N; i++) {
+    dist.push(dist[i - 1] + Math.hypot(samples[i].x - samples[i - 1].x, samples[i].y - samples[i - 1].y));
+  }
+  const len = dist[N];
+  // Chunky flattened Cuban links, spaced so each one threads the next
+  const ow = 6.2 * s, oh = 3.05 * s, wall = 2.15 * s;
+  const spacing = ow * 1.18;
+  const n = Math.max(8, Math.round(len / spacing));
+  const at = (sLen: number): { x: number; y: number } => {
+    const target = Math.max(0, Math.min(len, sLen));
+    for (let i = 1; i <= N; i++) {
+      if (dist[i] >= target) {
+        const u = (target - dist[i - 1]) / Math.max(1e-6, dist[i] - dist[i - 1]);
+        return { x: samples[i - 1].x + (samples[i].x - samples[i - 1].x) * u, y: samples[i - 1].y + (samples[i].y - samples[i - 1].y) * u };
+      }
+    }
+    return samples[N];
+  };
+  const pts: Array<{ x: number; y: number; ang: number }> = [];
+  for (let i = 0; i <= n; i++) pts.push({ ...at((i / n) * len), ang: 0 });
   for (let i = 0; i < pts.length; i++) {
     const a = i === 0 ? Math.atan2(pts[1].y - pts[0].y, pts[1].x - pts[0].x)
       : i === pts.length - 1 ? Math.atan2(pts[i].y - pts[i - 1].y, pts[i].x - pts[i - 1].x)
       : Math.atan2(pts[i + 1].y - pts[i - 1].y, pts[i + 1].x - pts[i - 1].x);
     pts[i].ang = a;
   }
-  // Cuban links: thick interlocking flattened ovals, alternating twist
-  for (let i = 0; i < pts.length; i++) {
-    const p = pts[i];
-    const twist = i % 2 === 0 ? 0.12 : Math.PI / 2 - 0.12;
-    const ow = 5.3 * s, oh = 3.5 * s, thick = 1.45 * s;
+  const addRR = (x: number, y: number, w: number, h: number, r: number): void => {
+    const rad = Math.min(r, w / 2, h / 2);
+    c.moveTo(x + rad, y);
+    c.arcTo(x + w, y, x + w, y + h, rad);
+    c.arcTo(x + w, y + h, x, y + h, rad);
+    c.arcTo(x, y + h, x, y, rad);
+    c.arcTo(x, y, x + w, y, rad);
+    c.closePath();
+  };
+  const drawLink = (p: { x: number; y: number; ang: number }, i: number, edge: boolean): void => {
     c.save();
     c.translate(p.x, p.y);
-    c.rotate(p.ang + twist);
+    c.rotate(p.ang + (edge ? Math.PI / 2 : 0));
     const g = goldMetal(c, -ow, -oh, ow, oh);
     c.fillStyle = g;
     c.beginPath();
-    c.ellipse(0, 0, ow, oh, 0, 0, Math.PI * 2, false);
-    c.ellipse(0, 0, Math.max(0.6, ow - thick * 1.55), Math.max(0.4, oh - thick * 1.35), 0, 0, Math.PI * 2, true);
+    addRR(-ow, -oh, ow * 2, oh * 2, oh * 0.92);
+    addRR(-(ow - wall), -(oh - wall * 0.82), (ow - wall) * 2, (oh - wall * 0.82) * 2, Math.max(0.4 * s, (oh - wall * 0.82) * 0.85));
     c.fill("evenodd");
-    c.strokeStyle = "rgba(70,42,6,0.7)"; c.lineWidth = 0.55 * s;
-    c.beginPath(); c.ellipse(0, 0, ow, oh, 0, 0, Math.PI * 2); c.stroke();
-    c.strokeStyle = "rgba(90,56,10,0.45)"; c.lineWidth = 0.45 * s;
-    c.beginPath(); c.ellipse(0, 0, Math.max(0.6, ow - thick * 1.55), Math.max(0.4, oh - thick * 1.35), 0, 0, Math.PI * 2); c.stroke();
-    c.fillStyle = `rgba(255,250,210,${0.55 + Math.sin(t * 2.2 + i) * 0.3})`;
-    c.beginPath(); c.ellipse(-ow * 0.28, -oh * 0.3, ow * 0.28, oh * 0.2, -0.3, 0, Math.PI * 2); c.fill();
+    c.strokeStyle = "rgba(55,32,4,0.8)"; c.lineWidth = 0.55 * s;
+    c.beginPath(); addRR(-ow, -oh, ow * 2, oh * 2, oh * 0.92); c.stroke();
+    const ix = ow - wall, iy = oh - wall * 0.82;
+    c.strokeStyle = "rgba(35,20,4,0.75)"; c.lineWidth = 0.65 * s;
+    c.beginPath(); addRR(-ix, -iy, ix * 2, iy * 2, Math.max(0.4 * s, iy * 0.85)); c.stroke();
+    // rim shine along the gold, not a spherical pearl
+    c.strokeStyle = `rgba(255,248,214,${0.5 + Math.sin(t * 2.2 + i) * 0.2})`;
+    c.lineWidth = 0.75 * s; c.lineCap = "round";
+    c.beginPath(); c.ellipse(0, 0, ow * 0.68, oh * 0.48, 0, -2.35, -0.55); c.stroke();
     c.restore();
-  }
+  };
+  for (let i = 0; i < pts.length; i += 2) drawLink(pts[i], i, false);
+  for (let i = 1; i < pts.length; i += 2) drawLink(pts[i], i, true);
 }
 
 function drawJohnShades(c: CanvasRenderingContext2D, cx: number, cy: number, t: number, scale = 1): void {
@@ -1591,15 +1623,16 @@ function drawJohnShades(c: CanvasRenderingContext2D, cx: number, cy: number, t: 
     c.quadraticCurveTo(10.2 * s, 1.5 * s, 6.2 * s, 7.2 * s);
     c.quadraticCurveTo(0.5 * s, 9.4 * s, -5.4 * s, 5.2 * s);
     c.quadraticCurveTo(-8.6 * s, 0.6 * s, -6.2 * s, -5.2 * s);
+    // dark tint — eyes underneath stay faintly visible (~25%)
     const lg = c.createLinearGradient(-6 * s, -6 * s, 6 * s, 8 * s);
-    lg.addColorStop(0, "#2c2420");
-    lg.addColorStop(0.28, "#0a0909");
-    lg.addColorStop(0.65, "#141212");
-    lg.addColorStop(1, "#050506");
+    lg.addColorStop(0, "rgba(36,28,24,0.72)");
+    lg.addColorStop(0.28, "rgba(8,6,6,0.78)");
+    lg.addColorStop(0.65, "rgba(16,14,14,0.74)");
+    lg.addColorStop(1, "rgba(4,4,6,0.82)");
     c.fillStyle = lg; c.fill();
     c.strokeStyle = goldMetal(c, -8 * s, -7 * s, 8 * s, 8 * s);
     c.lineWidth = 1.85 * s; c.lineJoin = "round"; c.stroke();
-    // glossy reflection
+    // glossy reflection on top of the tint
     c.fillStyle = `rgba(230,240,255,${0.16 + glint * 0.12})`;
     c.beginPath(); c.ellipse(-0.6 * s, -2.1 * s, 4.2 * s, 1.7 * s, -0.55, 0, Math.PI * 2); c.fill();
     c.fillStyle = `rgba(255,252,240,${0.45 + glint * 0.4})`;
@@ -1861,7 +1894,8 @@ function drawJohnPortrait(c: CanvasRenderingContext2D, w: number, h: number, t =
   c.beginPath(); c.ellipse(3.2, 2.4, 1.5, 1.1, 0, 0, Math.PI * 2); c.fill();
 
   drawJohnStubble(c, 0, 2, 26, 26);
-  drawJohnBrows(c, 0, -12);
+  // eyes first, then dark aviators so the irises show faintly through the tint
+  drawJohnEyes(c, 0, -12, false);
   drawJohnShades(c, 0, -12, t, 1);
 
   // short weathered mustache
@@ -1869,24 +1903,35 @@ function drawJohnPortrait(c: CanvasRenderingContext2D, w: number, h: number, t =
   c.beginPath(); c.ellipse(-6.5, 8.2, 7.2, 2.4, -0.15, 0, Math.PI * 2); c.fill();
   c.beginPath(); c.ellipse(6.5, 8.2, 7.2, 2.4, 0.15, 0, Math.PI * 2); c.fill();
 
-  // mouth — set, slight movement opposite the cigar
-  const mx = -3, my = 13.5 + jaw;
-  c.strokeStyle = "#5a3020"; c.lineWidth = 1.3; c.lineCap = "round";
+  // mouth pinched on a cigar in the viewer's-right corner; left side may open to talk
+  const my = 13.45 + jaw * 0.25;
+  const open = talkAmt * 1.55;
+  const cigarAng = 0.22 + (talkAmt * 0.02) + (hatTip ? -0.03 : 0);
+  const lipX = 5.55, lipY = my;
+  const cigarX = lipX + Math.cos(cigarAng) * 1.85;
+  const cigarY = lipY + Math.sin(cigarAng) * 1.85;
+  c.fillStyle = "#3a1814";
   c.beginPath();
-  if (talkAmt > 0.35) {
-    c.fillStyle = "#3a1814";
-    c.beginPath(); c.ellipse(mx, my, 5.5, 1.2 + talkAmt * 1.4, 0, 0, Math.PI * 2); c.fill();
-    c.stroke();
-  } else {
-    c.beginPath();
-    c.moveTo(mx - 6, my);
-    c.quadraticCurveTo(mx, my + 1.4, mx + 5, my + 0.2);
-    c.stroke();
-  }
-
-  // cigar in the left corner (viewer's right)
-  const cigarAng = 0.38 + (talkAmt * 0.04) + (hatTip ? -0.03 : 0);
-  drawCigar(c, 11.5, 13.2 + jaw * 0.4, cigarAng, t, 1, true);
+  c.moveTo(-9.2, my);
+  c.quadraticCurveTo(-3.2, my - 0.2 - open, 1.6, my - 0.05);
+  c.quadraticCurveTo(4.0, my + 0.05, lipX, lipY);
+  c.quadraticCurveTo(4.0, my + 0.7 + open, 1.2, my + 0.55 + open * 1.15);
+  c.quadraticCurveTo(-3.6, my + 0.7 + open * 1.55, -9.2, my);
+  c.closePath();
+  c.fill();
+  c.strokeStyle = "#5a3020"; c.lineWidth = 1.15; c.lineCap = "round"; c.stroke();
+  drawCigar(c, cigarX, cigarY, cigarAng, t, 1, true);
+  // lips wrapping the butt so the cigar is clenched, not floating
+  const lip = "#c08a64";
+  c.fillStyle = lip;
+  c.beginPath(); c.ellipse(lipX - 0.2, lipY - 1.05, 2.7, 1.25, 0.18, 0, Math.PI * 2); c.fill();
+  c.fillStyle = "#a07050";
+  c.beginPath(); c.ellipse(lipX - 0.1, lipY + 1.15, 2.35, 1.05, -0.12, 0, Math.PI * 2); c.fill();
+  c.strokeStyle = "rgba(80,42,28,0.55)"; c.lineWidth = 0.8;
+  c.beginPath();
+  c.moveTo(lipX - 2.4, lipY - 0.15);
+  c.quadraticCurveTo(lipX, lipY + 0.35, lipX + 1.7, lipY + 0.05);
+  c.stroke();
 
   // ——— weathered Stetson ———
   const tipY = hatTip ? -6 - Math.sin(t * 3.2) * 1.2 : 0;
@@ -1978,8 +2023,17 @@ function drawJohnWorld(c: CanvasRenderingContext2D, t: number, act: FarmAct = "i
   // stubble hint
   c.fillStyle = "rgba(40,24,14,0.4)";
   c.beginPath(); c.ellipse(0, -3.2, 5, 3.4, 0, 0, Math.PI * 2); c.fill();
-  // gold aviator sunglasses
-  c.fillStyle = "#0a0a0a";
+  // faint eyes, then dark gold-rimmed sunglasses (eyes show through the tint)
+  c.fillStyle = "#d8c8b4";
+  c.beginPath(); c.ellipse(-2.4, -7.15, 1.55, 1.05, -0.15, 0, Math.PI * 2); c.fill();
+  c.beginPath(); c.ellipse(2.4, -7.15, 1.55, 1.05, 0.15, 0, Math.PI * 2); c.fill();
+  c.fillStyle = "#3a4a54";
+  c.beginPath(); c.arc(-2.3, -7.1, 0.7, 0, Math.PI * 2); c.fill();
+  c.beginPath(); c.arc(2.5, -7.1, 0.7, 0, Math.PI * 2); c.fill();
+  c.fillStyle = "#0c0e10";
+  c.beginPath(); c.arc(-2.25, -7.1, 0.35, 0, Math.PI * 2); c.fill();
+  c.beginPath(); c.arc(2.55, -7.1, 0.35, 0, Math.PI * 2); c.fill();
+  c.fillStyle = "rgba(10,8,8,0.75)";
   c.beginPath(); c.ellipse(-2.4, -7.15, 2.15, 1.55, -0.15, 0, Math.PI * 2); c.fill();
   c.beginPath(); c.ellipse(2.4, -7.15, 2.15, 1.55, 0.15, 0, Math.PI * 2); c.fill();
   c.strokeStyle = goldMetal(c, -5, -8, 5, -6); c.lineWidth = 0.85;
@@ -1989,11 +2043,13 @@ function drawJohnWorld(c: CanvasRenderingContext2D, t: number, act: FarmAct = "i
   c.fillStyle = "rgba(255,252,240,0.65)";
   c.beginPath(); c.ellipse(-3.0, -7.5, 0.55, 0.3, -0.4, 0, Math.PI * 2); c.fill();
   c.beginPath(); c.ellipse(1.8, -7.5, 0.55, 0.3, -0.4, 0, Math.PI * 2); c.fill();
-  // thin mouth
+  // thin mouth, pinched at the cigar corner
   c.strokeStyle = "#5a3020"; c.lineWidth = 0.8;
-  c.beginPath(); c.moveTo(-2, -3.1); c.lineTo(1.4, -3.0); c.stroke();
-  // cigar
-  drawCigar(c, 2.2, -3.0, 0.45, t, 0.38, true);
+  c.beginPath(); c.moveTo(-2, -3.1); c.lineTo(1.15, -3.02); c.stroke();
+  // cigar clenched in the corner, butt overlapping the lip
+  drawCigar(c, 1.55, -3.02, 0.32, t, 0.38, true);
+  c.strokeStyle = "rgba(120,70,45,0.8)"; c.lineWidth = 0.7;
+  c.beginPath(); c.moveTo(0.7, -3.25); c.quadraticCurveTo(1.3, -2.7, 1.9, -3.0); c.stroke();
   // Stetson
   c.save();
   c.translate(0, -12.6 + tip);
