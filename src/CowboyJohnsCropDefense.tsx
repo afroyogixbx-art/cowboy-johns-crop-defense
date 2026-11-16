@@ -6,7 +6,7 @@ import type { CSSProperties, ChangeEvent, ReactNode } from "./grok";
    Mobile-first tower defense. Import surface matches grok/canvas.
    ============================================================ */
 
-type Screen = "title" | "help" | "play" | "paused" | "victory" | "defeat";
+type Screen = "title" | "help" | "play" | "paused" | "victory" | "defeat" | "levelup";
 type TowerId = "ladybug" | "neem" | "sticky" | "scarecrow" | "mantis" | "predatory" | "uv" | "duster";
 type EnemyId = "mite" | "aphid" | "beetle" | "caterpillar" | "inchworm" | "gnat" | "mildew" | "queen" | "locust" | "king" | "joe";
 type Speaker = "john" | "joe" | "narrator";
@@ -62,9 +62,10 @@ interface Sim {
   seen: EnemyId[]; dirty: boolean; over: boolean; pendingEnd: number; shake: number;
   revealed: boolean; joeHere: boolean; johnHere: boolean;
   freeUsed: boolean; cut: Cutscene | null;
+  johnQ: JohnMsg[]; autoWaveT: number;
 }
 
-const WW = 1000, WH = 800, PATH_W = 44, START_CASH = 0, START_LIVES = 100, SELL = 0.7, MAX_WAVE = 40, SAVE_KEY = "cjcd-save-v1", CODE_PFX = "CJ1.";
+const WW = 1000, WH = 800, PATH_W = 44, START_CASH = 0, START_LIVES = 100, SELL = 0.7, MAX_WAVE = 40, WAVES_PER_LEVEL = 20, AUTO_WAVE_DELAY = 2.5, SAVE_KEY = "cjcd-save-v1", CODE_PFX = "CJ1.";
 const TARGETS: TargetMode[] = ["first", "last", "close", "strong"];
 const MAP_ID = "johns-south-field";
 
@@ -89,45 +90,45 @@ const NOBUILD: { x: number; y: number; r?: number; w?: number; h?: number }[] = 
 ];
 
 const TOWERS: TowerDef[] = [
-  { id: "ladybug", name: "Ladybug Nest", short: "Ladybug", cost: 175, role: "Eats mites and small pests.", onPath: false, key: "1", color: "#c43c2c",
+  { id: "ladybug", name: "Ladybug Nest", short: "Ladybug", cost: 150, role: "Eats mites and small pests.", onPath: false, key: "1", color: "#c43c2c",
     paths: [
-      [{ name: "Hungry Brood", desc: "Ladybugs strike 30% faster.", cost: 150 }, { name: "Swarm", desc: "Two ladybugs hunt at once.", cost: 320 }, { name: "Colony", desc: "Three hunters and a wider range.", cost: 800 }, { name: "Blight Feast", desc: "Tiny pests are snapped up instantly.", cost: 2200 }],
-      [{ name: "Strong Jaws", desc: "+4 damage per bite.", cost: 160 }, { name: "Iron Mandibles", desc: "Chew through armor.", cost: 380 }, { name: "Sky Leap", desc: "Ladybugs can pounce on flying pests.", cost: 950 }, { name: "Apex Predator", desc: "Brutal bites that finish wounded foes.", cost: 2600 }],
+      [{ name: "Hungry Brood", desc: "Ladybugs strike 30% faster.", cost: 130 }, { name: "Swarm", desc: "Two ladybugs hunt at once.", cost: 270 }, { name: "Colony", desc: "Three hunters and a wider range.", cost: 680 }, { name: "Blight Feast", desc: "Tiny pests are snapped up instantly.", cost: 1850 }],
+      [{ name: "Strong Jaws", desc: "+4 damage per bite.", cost: 135 }, { name: "Iron Mandibles", desc: "Chew through armor.", cost: 325 }, { name: "Sky Leap", desc: "Ladybugs can pounce on flying pests.", cost: 810 }, { name: "Apex Predator", desc: "Brutal bites that finish wounded foes.", cost: 2200 }],
     ] },
-  { id: "neem", name: "Neem Oil Sprayer", short: "Neem", cost: 250, role: "Cone of oil that slows a pack.", onPath: false, key: "2", color: "#5a8a2a",
+  { id: "neem", name: "Neem Oil Sprayer", short: "Neem", cost: 210, role: "Cone of oil that slows a pack.", onPath: false, key: "2", color: "#5a8a2a",
     paths: [
-      [{ name: "Wide Fan", desc: "A much broader spray cone.", cost: 180 }, { name: "Heavy Mist", desc: "The mist reaches flying pests and clings longer.", cost: 400 }, { name: "Sap Flood", desc: "Pests crawl through heavy, lasting sap.", cost: 950 }, { name: "Amber Prison", desc: "Soaked pests are briefly stuck fast.", cost: 2800 }],
-      [{ name: "Caustic Mix", desc: "The oil burns as it coats.", cost: 200 }, { name: "Toxin Vat", desc: "Stronger burn, longer tick.", cost: 450 }, { name: "Blight Sight", desc: "Reveals mildew and scorches it.", cost: 1000 }, { name: "Harvest Burn", desc: "A devastating, widening spray.", cost: 3000 }],
+      [{ name: "Wide Fan", desc: "A much broader spray cone.", cost: 155 }, { name: "Heavy Mist", desc: "The mist reaches flying pests and clings longer.", cost: 340 }, { name: "Sap Flood", desc: "Pests crawl through heavy, lasting sap.", cost: 810 }, { name: "Amber Prison", desc: "Soaked pests are briefly stuck fast.", cost: 2400 }],
+      [{ name: "Caustic Mix", desc: "The oil burns as it coats.", cost: 170 }, { name: "Toxin Vat", desc: "Stronger burn, longer tick.", cost: 380 }, { name: "Blight Sight", desc: "Reveals mildew and scorches it.", cost: 850 }, { name: "Harvest Burn", desc: "A devastating, widening spray.", cost: 2550 }],
     ] },
-  { id: "sticky", name: "Sticky Trap", short: "Trap", cost: 60, role: "On-path glue. Slows, then wears out.", onPath: true, key: "3", color: "#e0a84a",
+  { id: "sticky", name: "Sticky Trap", short: "Trap", cost: 50, role: "On-path glue. Slows, then wears out.", onPath: true, key: "3", color: "#e0a84a",
     paths: [
-      [{ name: "Extra Glue", desc: "Holds twice as many pests.", cost: 80 }, { name: "Tarpit", desc: "A deep, lasting pit of sap.", cost: 200 }, { name: "Webbed Pit", desc: "Pests that step in are briefly stopped.", cost: 500 }, { name: "Endless Sap", desc: "The trap no longer wears out.", cost: 1200 }],
-      [{ name: "Barbs", desc: "Glue-covered thorns deal damage.", cost: 80 }, { name: "Spike Pot", desc: "Heavier spikes, some armor bite.", cost: 220 }, { name: "Bear Trap", desc: "A sharp snap stuns the caught.", cost: 550 }, { name: "Thresher", desc: "A grinding damage zone on the path.", cost: 1400 }],
+      [{ name: "Extra Glue", desc: "Holds twice as many pests.", cost: 70 }, { name: "Tarpit", desc: "A deep, lasting pit of sap.", cost: 170 }, { name: "Webbed Pit", desc: "Pests that step in are briefly stopped.", cost: 425 }, { name: "Endless Sap", desc: "The trap no longer wears out.", cost: 1000 }],
+      [{ name: "Barbs", desc: "Glue-covered thorns deal damage.", cost: 70 }, { name: "Spike Pot", desc: "Heavier spikes, some armor bite.", cost: 185 }, { name: "Bear Trap", desc: "A sharp snap stuns the caught.", cost: 470 }, { name: "Thresher", desc: "A grinding damage zone on the path.", cost: 1200 }],
     ] },
-  { id: "scarecrow", name: "Scarecrow Gunslinger", short: "Gunslinger", cost: 425, role: "Long-range revolver, one shot at a time.", onPath: false, key: "4", color: "#c47a2c",
+  { id: "scarecrow", name: "Scarecrow Gunslinger", short: "Gunslinger", cost: 360, role: "Long-range revolver, one shot at a time.", onPath: false, key: "4", color: "#c47a2c",
     paths: [
-      [{ name: "Quick Draw", desc: "Fires much faster.", cost: 250 }, { name: "Fan the Hammer", desc: "Faster still, and can wing flying pests.", cost: 550 }, { name: "Dual Wield", desc: "Two revolvers, two shots.", cost: 1300 }, { name: "Ricochet", desc: "Bullets bounce to a nearby pest.", cost: 3200 }],
-      [{ name: "Long Barrel", desc: "More range and punch.", cost: 280 }, { name: "Hollow Point", desc: "Pierces armor.", cost: 650 }, { name: "Deadeye", desc: "Sees mildew. Chance of a critical shot.", cost: 1500 }, { name: "High Noon", desc: "A long, heavy snipe.", cost: 3800 }],
+      [{ name: "Quick Draw", desc: "Fires much faster.", cost: 210 }, { name: "Fan the Hammer", desc: "Faster still, and can wing flying pests.", cost: 470 }, { name: "Dual Wield", desc: "Two revolvers, two shots.", cost: 1100 }, { name: "Ricochet", desc: "Bullets bounce to a nearby pest.", cost: 2700 }],
+      [{ name: "Long Barrel", desc: "More range and punch.", cost: 240 }, { name: "Hollow Point", desc: "Pierces armor.", cost: 550 }, { name: "Deadeye", desc: "Sees mildew. Chance of a critical shot.", cost: 1275 }, { name: "High Noon", desc: "A long, heavy snipe.", cost: 3250 }],
     ] },
-  { id: "mantis", name: "Praying Mantis Post", short: "Mantis", cost: 350, role: "Short-range melee slashes.", onPath: false, key: "5", color: "#6a9a3a",
+  { id: "mantis", name: "Praying Mantis Post", short: "Mantis", cost: 300, role: "Short-range melee slashes.", onPath: false, key: "5", color: "#6a9a3a",
     paths: [
-      [{ name: "Fast Claws", desc: "Strikes much faster.", cost: 220 }, { name: "Cleave", desc: "Hits up to three pests in reach.", cost: 500 }, { name: "Whirlwind", desc: "Slices every pest in range.", cost: 1100 }, { name: "Dance of Blades", desc: "A blur of claws and a longer reach.", cost: 2800 }],
-      [{ name: "Piercing Hook", desc: "Heavier blades.", cost: 250 }, { name: "Armor Crack", desc: "Rips through shells.", cost: 600 }, { name: "Execute", desc: "Finishes wounded (non-boss) pests.", cost: 1400 }, { name: "Reaper", desc: "Devastating slashes, even on bosses.", cost: 3500 }],
+      [{ name: "Fast Claws", desc: "Strikes much faster.", cost: 185 }, { name: "Cleave", desc: "Hits up to three pests in reach.", cost: 425 }, { name: "Whirlwind", desc: "Slices every pest in range.", cost: 925 }, { name: "Dance of Blades", desc: "A blur of claws and a longer reach.", cost: 2400 }],
+      [{ name: "Piercing Hook", desc: "Heavier blades.", cost: 210 }, { name: "Armor Crack", desc: "Rips through shells.", cost: 510 }, { name: "Execute", desc: "Finishes wounded (non-boss) pests.", cost: 1200 }, { name: "Reaper", desc: "Devastating slashes, even on bosses.", cost: 3000 }],
     ] },
-  { id: "predatory", name: "Predatory Mite Release", short: "Predators", cost: 300, role: "Releases mites that chew over time.", onPath: false, key: "6", color: "#8a5a2a",
+  { id: "predatory", name: "Predatory Mite Release", short: "Predators", cost: 255, role: "Releases mites that chew over time.", onPath: false, key: "6", color: "#8a5a2a",
     paths: [
-      [{ name: "Brood Box", desc: "Two stacks of mites at once.", cost: 200 }, { name: "Infest", desc: "Three stacks, applied faster.", cost: 480 }, { name: "Plague Jump", desc: "Mites leap to a nearby pest on death.", cost: 1100 }, { name: "Pandemic", desc: "Longer infestations that jump farther.", cost: 2900 }],
-      [{ name: "Vicious Strain", desc: "Much stronger chewing.", cost: 220 }, { name: "Winged Mites", desc: "They can catch flying pests.", cost: 520 }, { name: "Burrowers", desc: "Ignore armor and find mildew.", cost: 1200 }, { name: "Hemorrhage", desc: "Brutal chew, bursting as they finish.", cost: 3100 }],
+      [{ name: "Brood Box", desc: "Two stacks of mites at once.", cost: 170 }, { name: "Infest", desc: "Three stacks, applied faster.", cost: 410 }, { name: "Plague Jump", desc: "Mites leap to a nearby pest on death.", cost: 925 }, { name: "Pandemic", desc: "Longer infestations that jump farther.", cost: 2450 }],
+      [{ name: "Vicious Strain", desc: "Much stronger chewing.", cost: 185 }, { name: "Winged Mites", desc: "They can catch flying pests.", cost: 440 }, { name: "Burrowers", desc: "Ignore armor and find mildew.", cost: 1000 }, { name: "Hemorrhage", desc: "Brutal chew, bursting as they finish.", cost: 2650 }],
     ] },
-  { id: "uv", name: "UV Lamp", short: "UV Lamp", cost: 475, role: "Reveals mildew and burns pests.", onPath: false, key: "7", color: "#7a5cff",
+  { id: "uv", name: "UV Lamp", short: "UV Lamp", cost: 400, role: "Reveals mildew and burns pests.", onPath: false, key: "7", color: "#7a5cff",
     paths: [
-      [{ name: "Floodlight", desc: "A wider detection and burn range.", cost: 280 }, { name: "Beacon", desc: "Nearby towers can see mildew too.", cost: 620 }, { name: "Watchtower", desc: "A large detect aura and a hotter lamp.", cost: 1500 }, { name: "Sunburst", desc: "Periodic pulse that scorches hidden pests.", cost: 3600 }],
-      [{ name: "UV Burn", desc: "Hotter light, especially on mildew.", cost: 300 }, { name: "Sterilizer", desc: "A lingering burn.", cost: 700 }, { name: "Scorch Beam", desc: "The beam leaps to a second pest.", cost: 1600 }, { name: "Solar Flare", desc: "A fierce, chaining flare.", cost: 4000 }],
+      [{ name: "Floodlight", desc: "A wider detection and burn range.", cost: 240 }, { name: "Beacon", desc: "Nearby towers can see mildew too.", cost: 525 }, { name: "Watchtower", desc: "A large detect aura and a hotter lamp.", cost: 1275 }, { name: "Sunburst", desc: "Periodic pulse that scorches hidden pests.", cost: 3050 }],
+      [{ name: "UV Burn", desc: "Hotter light, especially on mildew.", cost: 255 }, { name: "Sterilizer", desc: "A lingering burn.", cost: 600 }, { name: "Scorch Beam", desc: "The beam leaps to a second pest.", cost: 1350 }, { name: "Solar Flare", desc: "A fierce, chaining flare.", cost: 3400 }],
     ] },
-  { id: "duster", name: "Crop Duster", short: "Duster", cost: 800, role: "A biplane runs the field on a timer.", onPath: false, key: "8", color: "#4a7ab0",
+  { id: "duster", name: "Crop Duster", short: "Duster", cost: 680, role: "A biplane runs the field on a timer.", onPath: false, key: "8", color: "#4a7ab0",
     paths: [
-      [{ name: "Frequent Runs", desc: "The plane comes around sooner.", cost: 400 }, { name: "Crop Cover", desc: "More drops, and they find mildew.", cost: 900 }, { name: "Carpet Run", desc: "Bombs the whole dirt path.", cost: 2200 }, { name: "Air Show", desc: "Two planes, very often.", cost: 5000 }],
-      [{ name: "Payload", desc: "Heavier dust charges.", cost: 450 }, { name: "Bunker Buster", desc: "Bigger blasts that bite armor.", cost: 1000 }, { name: "Tank Buster", desc: "Devastating vs shells and bosses.", cost: 2400 }, { name: "Harvest Moon", desc: "A massive, burning payload.", cost: 5600 }],
+      [{ name: "Frequent Runs", desc: "The plane comes around sooner.", cost: 340 }, { name: "Crop Cover", desc: "More drops, and they find mildew.", cost: 760 }, { name: "Carpet Run", desc: "Bombs the whole dirt path.", cost: 1850 }, { name: "Air Show", desc: "Two planes, very often.", cost: 4250 }],
+      [{ name: "Payload", desc: "Heavier dust charges.", cost: 380 }, { name: "Bunker Buster", desc: "Bigger blasts that bite armor.", cost: 850 }, { name: "Tank Buster", desc: "Devastating vs shells and bosses.", cost: 2050 }, { name: "Harvest Moon", desc: "A massive, burning payload.", cost: 4750 }],
     ] },
 ];
 const TDEF: Record<TowerId, TowerDef> = Object.fromEntries(TOWERS.map((d) => [d.id, d])) as Record<TowerId, TowerDef>;
@@ -153,7 +154,7 @@ const JOHN_TIPS = [
   "Towers sit beside the path, not on it — except Sticky Traps, which belong right in the dirt.",
   "Each tower has two upgrade paths. You can take one path all the way and the other up to tier 2.",
   "Tap a placed tower to upgrade, change its target, or sell it back for a partial refund.",
-  "Space starts the next wave. You can also hammer that Start Wave button.",
+  "Waves start on their own after a short breather. Hit Space or Start Wave if you want them sooner.",
   "A half-pushed plan is still a plan. Place a couple towers before you open the gate.",
   "If it flies, a regular nest can't catch it. UV Lamps, the Crop Duster, or the right upgrades will.",
   "Mildew hides in plain sight. A UV Lamp lights it up, and a Beacon lets nearby towers see it too.",
@@ -178,6 +179,13 @@ const JOHN_NEW: Partial<Record<EnemyId, string>> = {
 
 const JOE_AWAY = [4, 8, 10, 14, 18, 20, 24, 28, 30, 34, 36, 38, 40];
 function joeAwayFor(wave: number): boolean { return JOE_AWAY.indexOf(wave) >= 0; }
+function levelOf(wave: number): number { return Math.max(1, Math.floor((Math.max(1, wave) - 1) / WAVES_PER_LEVEL) + 1); }
+function waveInLevel(wave: number): number { return ((Math.max(1, wave) - 1) % WAVES_PER_LEVEL) + 1; }
+function waveHudLabel(wave: number, waving = false): string {
+  const fp = wave > MAX_WAVE ? " · Freeplay" : "";
+  const inc = waving ? " · INCOMING" : "";
+  return `Level ${levelOf(wave)} · Wave ${waveInLevel(wave)}/${WAVES_PER_LEVEL}${fp}${inc}`;
+}
 
 const JOE_HELLO = JOE_LINE + " Name's Joe. I lend a hand on South Field when John needs one — fence line, mostly.";
 const JOE_REVEAL = "You finally noticed. I was wonderin' how many walks it'd take. Those mites? They've always been mine to send. This farm just didn't know it yet. " + JOE_LINE;
@@ -967,38 +975,49 @@ function grassOk(x: number, y: number): boolean {
   return true;
 }
 
-function drawGrassBlade(c: CanvasRenderingContext2D, x: number, y: number, h: number, col: string, lean: number): void {
-  c.strokeStyle = col; c.lineWidth = 1.15; c.lineCap = "round";
-  c.beginPath(); c.moveTo(x, y); c.quadraticCurveTo(x + lean, y - h * 0.55, x + lean * 1.4, y - h); c.stroke();
+function drawGrassBlade(c: CanvasRenderingContext2D, x: number, y: number, h: number, col: string, lean: number, w = 1.15): void {
+  c.strokeStyle = col; c.lineWidth = w; c.lineCap = "round";
+  c.beginPath(); c.moveTo(x, y); c.quadraticCurveTo(x + lean * 0.55, y - h * 0.48, x + lean, y - h); c.stroke();
+}
+
+const GRASS_COLS = ["#163f18", "#1d5420", "#246628", "#2d7a2c", "#368c32", "#429e38", "#52b440", "#67c84a", "#2a6a26", "#3d8a30", "#1a4a1c"];
+
+function drawGrassBlades(c: CanvasRenderingContext2D, leanMul: number, mode: "stubble" | "blades"): void {
+  const rng = mulberry(mode === "stubble" ? 33 : 41);
+  const nTuft = mode === "stubble" ? 2200 : 2600;
+  for (let i = 0; i < nTuft; i++) {
+    const x = 6 + rng() * (WW - 12), y = 12 + rng() * (WH - 18);
+    if (!grassOk(x, y)) continue;
+    const h = mode === "stubble" ? 3 + rng() * 6 : 8 + rng() * 12;
+    const lean = ((rng() - 0.5) * (mode === "stubble" ? 2.2 : 5.2)) + leanMul * (0.65 + rng() * 0.9);
+    const col = GRASS_COLS[i % GRASS_COLS.length];
+    const n = mode === "stubble" ? 2 + (i % 3) : 3 + (i % 4);
+    const w = mode === "stubble" ? 0.7 + rng() * 0.45 : 0.9 + rng() * 0.75;
+    for (let k = 0; k < n; k++) drawGrassBlade(c, x + (k - (n - 1) / 2) * 1.3, y, h + rng() * (mode === "stubble" ? 2 : 4.5), col, lean + (k - 1) * 1.05, w);
+  }
 }
 
 function drawGrassDetails(c: CanvasRenderingContext2D): void {
   const rng = mulberry(33);
-  // tufts and blades
-  for (let i = 0; i < 220; i++) {
-    const x = 12 + rng() * (WW - 24), y = 20 + rng() * (WH - 30);
-    if (!grassOk(x, y)) continue;
-    const col = i % 3 === 0 ? "#2f8a30" : i % 3 === 1 ? "#5ed24a" : "#3aa336";
-    const h = 5 + rng() * 8;
-    const lean = (rng() - 0.5) * 4;
-    const n = 2 + (i % 3);
-    for (let k = 0; k < n; k++) drawGrassBlade(c, x + k * 1.6 - 1.6, y, h + rng() * 3, col, lean + (k - 1) * 1.1);
-  }
-  // tiny flowers
-  const petals = ["#fff6e0", "#ffe36a", "#ff8eb8", "#fffaf0", "#ffd0e8"];
-  for (let i = 0; i < 70; i++) {
+  drawGrassBlades(c, 0, "stubble");
+  // sparse wildflowers in a few colors
+  const petals = ["#fff6e8", "#ffe36a", "#ff8eb8", "#d8c4ff"];
+  for (let i = 0; i < 38; i++) {
     const x = 16 + rng() * (WW - 32), y = 24 + rng() * (WH - 36);
     if (!grassOk(x, y)) continue;
     const col = petals[i % petals.length];
+    const r = 1.8 + rng() * 0.7;
+    c.strokeStyle = "#2a6a24"; c.lineWidth = 1;
+    c.beginPath(); c.moveTo(x, y + 3); c.lineTo(x + (rng() - 0.5) * 1.4, y - 2); c.stroke();
     for (let k = 0; k < 5; k++) {
-      const a = (k / 5) * Math.PI * 2;
+      const a = (k / 5) * Math.PI * 2 + rng() * 0.2;
       c.fillStyle = col;
-      c.beginPath(); c.ellipse(x + Math.cos(a) * 2.2, y + Math.sin(a) * 2.0, 1.7, 1.15, a, 0, Math.PI * 2); c.fill();
+      c.beginPath(); c.ellipse(x + Math.cos(a) * 2.1, y + Math.sin(a) * 1.9, r, r * 0.62, a, 0, Math.PI * 2); c.fill();
     }
-    c.fillStyle = "#f0c020"; c.beginPath(); c.arc(x, y, 1.15, 0, Math.PI * 2); c.fill();
+    c.fillStyle = "#f0c020"; c.beginPath(); c.arc(x, y, 1.05, 0, Math.PI * 2); c.fill();
   }
-  // clover
-  for (let i = 0; i < 36; i++) {
+  // a few clover
+  for (let i = 0; i < 18; i++) {
     const x = 16 + rng() * (WW - 32), y = 24 + rng() * (WH - 36);
     if (!grassOk(x, y)) continue;
     c.fillStyle = "#2f9a38";
@@ -1008,44 +1027,35 @@ function drawGrassDetails(c: CanvasRenderingContext2D): void {
     }
   }
   // pebbles
-  for (let i = 0; i < 50; i++) {
+  for (let i = 0; i < 36; i++) {
     const x = 16 + rng() * (WW - 32), y = 24 + rng() * (WH - 36);
     if (!grassOk(x, y)) continue;
-    c.fillStyle = i % 2 ? "rgba(130,120,110,0.85)" : "rgba(90,86,80,0.8)";
-    c.beginPath(); c.ellipse(x, y, 2.2 + rng() * 2.4, 1.3 + rng() * 1.4, rng() * 3, 0, Math.PI * 2); c.fill();
-    c.fillStyle = "rgba(255,255,255,0.25)";
-    c.beginPath(); c.ellipse(x - 0.6, y - 0.4, 0.8, 0.45, 0, 0, Math.PI * 2); c.fill();
-  }
-  // little weeds / dandelion puffs
-  for (let i = 0; i < 22; i++) {
-    const x = 16 + rng() * (WW - 32), y = 24 + rng() * (WH - 36);
-    if (!grassOk(x, y)) continue;
-    c.strokeStyle = "#3a7a28"; c.lineWidth = 1.1;
-    c.beginPath(); c.moveTo(x, y); c.lineTo(x + (rng() - 0.5) * 2, y - 7); c.stroke();
-    c.fillStyle = "rgba(240,235,210,0.85)";
-    c.beginPath(); c.arc(x, y - 8, 2.6, 0, Math.PI * 2); c.fill();
-    c.strokeStyle = "rgba(80,70,40,0.35)"; c.lineWidth = 0.6;
-    c.beginPath(); c.arc(x, y - 8, 2.6, 0, Math.PI * 2); c.stroke();
+    c.fillStyle = i % 2 ? "rgba(130,120,110,0.8)" : "rgba(90,86,80,0.75)";
+    c.beginPath(); c.ellipse(x, y, 2.0 + rng() * 2.2, 1.2 + rng() * 1.3, rng() * 3, 0, Math.PI * 2); c.fill();
   }
 }
 
 function drawFarmBg(c: CanvasRenderingContext2D): void {
-  c.fillStyle = "#48b53a";
+  const ground = c.createLinearGradient(0, 0, 0, WH);
+  ground.addColorStop(0, "#2f6e28");
+  ground.addColorStop(0.4, "#2a6624");
+  ground.addColorStop(1, "#245820");
+  c.fillStyle = ground;
   c.fillRect(0, 0, WW, WH);
   const rng = mulberry(4);
-  const patches = ["#3aa332", "#5ccc48", "#2e8a2a", "#6ad24c", "#459c38", "#7ad85a", "#348028", "#58c044"];
-  for (let i = 0; i < 320; i++) {
+  const patches = ["#245820", "#2e6e28", "#1e4e1c", "#347a2c", "#286424", "#3a8430"];
+  for (let i = 0; i < 420; i++) {
     const x = rng() * WW, y = rng() * WH;
     c.fillStyle = patches[i % patches.length];
-    c.globalAlpha = 0.55 + rng() * 0.35;
-    c.beginPath(); c.ellipse(x, y, 16 + rng() * 48, 9 + rng() * 26, rng() * 3, 0, Math.PI * 2); c.fill();
+    c.globalAlpha = 0.22 + rng() * 0.28;
+    c.beginPath(); c.ellipse(x, y, 8 + rng() * 22, 5 + rng() * 14, rng() * 3, 0, Math.PI * 2); c.fill();
     c.globalAlpha = 1;
   }
   // fine tonal noise (prerendered once)
-  for (let i = 0; i < 7000; i++) {
+  for (let i = 0; i < 8000; i++) {
     const x = rng() * WW, y = rng() * WH;
-    c.fillStyle = rng() > 0.5 ? "rgba(20,70,18,0.16)" : "rgba(210,255,160,0.13)";
-    c.fillRect(x, y, 1 + rng() * 2, 1 + rng() * 2);
+    c.fillStyle = rng() > 0.5 ? "rgba(16,48,14,0.18)" : "rgba(200,240,150,0.10)";
+    c.fillRect(x, y, 1 + rng() * 1.8, 1 + rng() * 1.8);
   }
   drawHillside(c);
   // field soil patches between crop rows
@@ -1533,15 +1543,18 @@ type FarmAct = "idle" | "talk" | "hat" | "sip" | "mean";
 function drawFarmhand(c: CanvasRenderingContext2D, who: "john" | "joe", t: number, act: FarmAct = "idle"): void {
   if (who === "john") { drawJohnWorld(c, t, act); return; }
   const bob = Math.sin(t * 2.4) * 1.6;
-  c.save(); c.translate(0, bob);
-  shadowBlob(c, 0, 14, 12, 6, 0.28);
-  oval(c, 0, 6, 11, 9, "#6a8a3a", 2.4);
-  disc(c, 0, -2, 8.5, "#e8b888", 2.2);
+  c.save();
+  c.scale(1.58, 1.58);
+  c.translate(0, bob);
+  // crisp drop shadow + thick ink, no blur (blur read as a dark pot)
+  shadowBlob(c, 1, 17, 15, 6.5, 0.42);
+  oval(c, 0, 6, 11, 9, "#35588a", 3.6);
+  disc(c, 0, -2, 8.7, "#f4c8a0", 3.4);
   const tip = act === "hat" ? -10 - Math.sin(t * 6) * 2 : 0;
   const tilt = act === "hat" ? -0.35 : 0;
   c.save(); c.translate(0, -6 + tip); c.rotate(tilt);
-  oval(c, 0, 2, 14, 6, "#d8b04a", 2.3);
-  c.beginPath(); rr(c, -6, -5, 12, 7, 2); fillStroke(c, "#c49028", 2);
+  oval(c, 0, 2, 14, 6, "#efc45a", 3.4);
+  c.beginPath(); rr(c, -6, -5, 12, 7, 2); fillStroke(c, "#d49a28", 3.2);
   c.restore();
   const mad = act === "mean";
   toonEyes(c, 0, -3, 2.4, blinkAt(t, 31), 0, mad ? 0.4 : 0, mad);
@@ -2202,10 +2215,11 @@ function drawBetrayalSwarm(c: CanvasRenderingContext2D, t: number): void {
 }
 
 const SPR: {
-  farm?: HTMLCanvasElement; plant: HTMLCanvasElement[]; enemy: Partial<Record<EnemyId, HTMLCanvasElement[]>>;
+  farm?: HTMLCanvasElement; grass: HTMLCanvasElement[]; plant: HTMLCanvasElement[]; enemy: Partial<Record<EnemyId, HTMLCanvasElement[]>>;
   scale: number; hd: boolean;
-} = { plant: [], enemy: {}, scale: 0, hd: true };
+} = { grass: [], plant: [], enemy: {}, scale: 0, hd: true };
 let FARM_PRESENT: { img: HTMLCanvasElement; dw: number; dh: number; src: HTMLCanvasElement } | null = null;
+let GRASS_PRESENT: { img: HTMLCanvasElement[]; dw: number; dh: number; src: HTMLCanvasElement[] } | null = null;
 let SPR_PRESENT: { destE: number; destP: number; plant: HTMLCanvasElement[]; enemy: Partial<Record<EnemyId, HTMLCanvasElement[]>> } | null = null;
 function downscaleC(src: HTMLCanvasElement, w: number, h: number): HTMLCanvasElement {
   const c = makeC(w, h);
@@ -2225,11 +2239,13 @@ function ensureSprites(force = false): void {
   const scale = spriteScale();
   if (!force && SPR.farm && SPR.hd === hd && SPR.scale === scale) return;
   SPR.farm = undefined;
+  SPR.grass = [];
   SPR.plant = [];
   SPR.enemy = {};
   SPR.hd = hd;
   SPR.scale = scale;
   FARM_PRESENT = null;
+  GRASS_PRESENT = null;
   SPR_PRESENT = null;
   const farm = makeC(Math.round(WW * scale), Math.round(WH * scale));
   const fc = farm.getContext("2d");
@@ -2240,6 +2256,16 @@ function ensureSprites(force = false): void {
     drawCropLayer(fc, 1);
   }
   SPR.farm = farm;
+  for (const lean of [-2.4, 2.4]) {
+    const g = makeC(Math.round(WW * scale), Math.round(WH * scale));
+    const gc = g.getContext("2d");
+    if (gc) {
+      prepCtx(gc, true);
+      gc.scale(scale, scale);
+      drawGrassBlades(gc, lean, "blades");
+    }
+    SPR.grass.push(g);
+  }
   for (let i = 0; i < 5; i++) {
     const p = makeC(Math.round(140 * scale), Math.round(140 * scale));
     const pc = p.getContext("2d");
@@ -2280,7 +2306,59 @@ function wiltIndex(lives: number, max: number): number {
 function nid(s: Sim): number { s.uid += 1; return s.uid; }
 
 function say(s: Sim, text: string, modal = false, hold = 7, who: Speaker = "john", beat?: JohnMsg["beat"]): void {
-  s.john = { text, t: hold, modal, who, beat };
+  const msg: JohnMsg = { text, t: hold, modal, who, beat };
+  if (!s.john) { s.john = msg; return; }
+  if (modal && !s.john.modal) {
+    s.johnQ.unshift(s.john);
+    s.john = msg;
+    return;
+  }
+  s.johnQ.push(msg);
+}
+
+function dismissTalk(s: Sim): boolean {
+  if (s.cut || !s.john) return false;
+  const beat = s.john.beat;
+  s.john = s.johnQ.shift() ?? null;
+  if (beat === "intro") {
+    s.intro = false;
+    if (!s.john || s.john.beat !== "joeHello") {
+      if (s.john) s.johnQ.unshift(s.john);
+      s.john = null;
+      say(s, JOE_HELLO, true, 99, "joe", "joeHello");
+    }
+    return true;
+  }
+  if (beat === "reveal") {
+    if (!s.john || s.john.beat !== "johnReact") {
+      if (s.john) s.johnQ.unshift(s.john);
+      s.john = null;
+      say(s, JOHN_ON_REVEAL, false, 99, "john", "johnReact");
+    }
+    return true;
+  }
+  if (!s.john) s.intro = false;
+  return true;
+}
+
+function talkBlocksAuto(s: Sim): boolean {
+  return !!s.cut || !!s.john;
+}
+
+function tickAutoWave(s: Sim, realDt: number): void {
+  if (s.waving || s.screen !== "play" || s.over) { s.autoWaveT = 0; return; }
+  if (talkBlocksAuto(s)) return;
+  s.autoWaveT += realDt;
+  if (s.autoWaveT >= AUTO_WAVE_DELAY) {
+    s.autoWaveT = 0;
+    startWave(s);
+  }
+}
+
+function continueLevel(s: Sim): void {
+  if (s.screen !== "levelup") return;
+  s.screen = "play";
+  s.autoWaveT = 0;
 }
 
 function addFx(s: Sim, x: number, y: number, kind: Fx["kind"], c: string, r = 12, max = 0.35, ang = 0): void {
@@ -2716,6 +2794,7 @@ function updateEnemy(s: Sim, e: Enemy, dt: number): void {
 
 function startWave(s: Sim): boolean {
   if (s.waving || s.screen !== "play" || s.over || s.cut) return false;
+  s.autoWaveT = 0;
   const groups = waveGroups(s.wave);
   s.spawnQ = [];
   for (const g of groups) {
@@ -2748,7 +2827,8 @@ function endWave(s: Sim): void {
   const bonus = 50 + s.wave * 5;
   s.cash += bonus;
   addFloat(s, WW * 0.5, 80, `Wave ${s.wave} cleared  +$${bonus}`, "#7bc96f");
-  if (s.wave === MAX_WAVE && !s.won40) {
+  const cleared = s.wave;
+  if (cleared === MAX_WAVE && !s.won40) {
     s.won40 = true;
     s.revealed = true;
     s.joeHere = false;
@@ -2758,6 +2838,10 @@ function endWave(s: Sim): void {
   }
   s.wave += 1;
   applyStoryAfterWave(s);
+  if (s.screen !== "victory" && s.screen !== "defeat" && cleared % WAVES_PER_LEVEL === 0) {
+    s.screen = "levelup";
+    s.autoWaveT = 0;
+  }
   s.dirty = true;
   persist(s);
 }
@@ -2839,10 +2923,6 @@ function step(s: Sim, dt: number): void {
 function stepOnce(s: Sim, t: number): void {
   s.time += t;
   s.shake = Math.max(0, s.shake - t);
-  if (s.john && !s.john.modal) {
-    s.john.t -= t;
-    if (s.john.t <= 0) s.john = null;
-  }
   if (s.waving) {
     s.waveT += t;
     const rest: { at: number; kind: EnemyId }[] = [];
@@ -2928,6 +3008,7 @@ function freshSim(): Sim {
     selected: null, placing: null, hover: null, john: null, intro: true, won40: false, time: 0, uid: 1,
     seen: [], dirty: false, over: false, pendingEnd: 0, shake: 0,
     revealed: false, joeHere: true, johnHere: true, freeUsed: false, cut: null,
+    johnQ: [], autoWaveT: 0,
   };
   say(s, JOHN_INTRO, true, 99, "john", "intro");
   return s;
@@ -2937,6 +3018,8 @@ function applySave(d: SaveData): Sim {
   const s = freshSim();
   s.intro = false;
   s.john = null;
+  s.johnQ = [];
+  s.autoWaveT = 0;
   s.wave = Math.max(1, d.wave | 0);
   s.cash = Math.max(0, d.cash);
   s.lives = clamp(d.lives, 0, 999);
@@ -3002,13 +3085,42 @@ function drawFrame(c: CanvasRenderingContext2D, s: Sim, cssW: number, cssH: numb
         }
         FARM_PRESENT = { img: tmp, dw, dh, src: SPR.farm };
       }
+      if (!GRASS_PRESENT || GRASS_PRESENT.dw !== dw || GRASS_PRESENT.dh !== dh || GRASS_PRESENT.src !== SPR.grass) {
+        const imgs: HTMLCanvasElement[] = [];
+        for (const src of SPR.grass) {
+          const tmp = makeC(dw, dh);
+          const tc = tmp.getContext("2d");
+          if (tc) {
+            prepCtx(tc, true);
+            tc.drawImage(src, 0, 0, dw, dh);
+          }
+          imgs.push(tmp);
+        }
+        GRASS_PRESENT = { img: imgs, dw, dh, src: SPR.grass };
+      }
       c.setTransform(1, 0, 0, 1, 0, 0);
       c.imageSmoothingEnabled = false;
       c.drawImage(FARM_PRESENT.img, dpr * (ox + shx), dpr * (oy + shy));
+      if (GRASS_PRESENT.img.length >= 2) {
+        const fade = 0.5 + 0.5 * Math.sin((performance.now() / 1000) * (Math.PI * 2 / 3.4));
+        c.globalAlpha = 1 - fade;
+        c.drawImage(GRASS_PRESENT.img[0], dpr * (ox + shx), dpr * (oy + shy));
+        c.globalAlpha = fade;
+        c.drawImage(GRASS_PRESENT.img[1], dpr * (ox + shx), dpr * (oy + shy));
+        c.globalAlpha = 1;
+      }
       c.setTransform(dpr * scale, 0, 0, dpr * scale, dpr * (ox + shx), dpr * (oy + shy));
     } else {
       c.imageSmoothingEnabled = false;
       c.drawImage(SPR.farm, 0, 0, WW, WH);
+      if (SPR.grass.length >= 2) {
+        const fade = 0.5 + 0.5 * Math.sin((performance.now() / 1000) * (Math.PI * 2 / 3.4));
+        c.globalAlpha = 1 - fade;
+        c.drawImage(SPR.grass[0], 0, 0, WW, WH);
+        c.globalAlpha = fade;
+        c.drawImage(SPR.grass[1], 0, 0, WW, WH);
+        c.globalAlpha = 1;
+      }
     }
   }
   if (SETTINGS.hd) {
@@ -3049,13 +3161,8 @@ function drawFrame(c: CanvasRenderingContext2D, s: Sim, cssW: number, cssH: numb
   if (pfr) c.drawImage(pfr, -70, -70, 140, 140);
   else drawPlant(c, wilt, s.time);
   c.restore();
-  // hired help
-  if (s.johnHere && !(s.revealed && s.waving && s.wave >= 40)) {
-    c.save(); c.translate(JOHN_SPOT.x, JOHN_SPOT.y); drawFarmhand(c, "john", s.time, actFor("john", s)); c.restore();
-  }
-  if (s.joeHere && (!s.waving || !!s.cut)) {
-    c.save(); c.translate(JOE_SPOT.x, JOE_SPOT.y); drawFarmhand(c, "joe", s.time + 1, actFor("joe", s)); c.restore();
-  } else if (!s.revealed && !s.won40 && joeAwayFor(s.wave)) {
+  // Joe's away-mark stays on the ground; the figure itself is drawn later so towers never cover him.
+  if (!(s.joeHere && (!s.waving || !!s.cut)) && !s.revealed && !s.won40 && joeAwayFor(s.wave)) {
     c.fillStyle = "rgba(90,70,40,0.35)"; ellipse(c, JOE_SPOT.x, JOE_SPOT.y + 14, 14, 5); c.fill();
   }
   for (const tw of s.towers) {
@@ -3151,6 +3258,9 @@ function drawFrame(c: CanvasRenderingContext2D, s: Sim, cssW: number, cssH: numb
       c.fillStyle = f.c; c.fillRect(f.x - 1, f.y - 1, 2, 2);
     }
     c.globalAlpha = 1;
+  }
+  if (s.joeHere && (!s.waving || !!s.cut)) {
+    c.save(); c.translate(JOE_SPOT.x, JOE_SPOT.y); drawFarmhand(c, "joe", s.time + 1, actFor("joe", s)); c.restore();
   }
   for (const f of s.floats) {
     const k = 1 - f.t / f.max;
@@ -3280,7 +3390,7 @@ export default function CowboyJohnsCropDefense() {
       flush();
       trapBack();
       const s = sim.current;
-      if (s && (s.screen === "play" || s.screen === "paused" || s.screen === "victory")) {
+      if (s && (s.screen === "play" || s.screen === "paused" || s.screen === "victory" || s.screen === "levelup")) {
         if (s.screen === "play") s.screen = "paused";
         bump({ exitAsk: true });
       } else {
@@ -3308,8 +3418,8 @@ export default function CowboyJohnsCropDefense() {
       last = now;
       const s = sim.current;
       const cv = canvasRef.current;
-      if (s && (s.screen === "play" || s.screen === "paused" || s.screen === "victory" || s.screen === "defeat")) {
-        if (s.screen === "play") step(s, dt);
+      if (s && (s.screen === "play" || s.screen === "paused" || s.screen === "victory" || s.screen === "defeat" || s.screen === "levelup")) {
+        if (s.screen === "play") { step(s, dt); tickAutoWave(s, dt); }
         if (cv) {
           const r = cv.getBoundingClientRect();
           const dpr = playDpr();
@@ -3396,6 +3506,7 @@ export default function CowboyJohnsCropDefense() {
     const s = freshSim();
     s.intro = false;
     s.john = null;
+    s.johnQ = [];
     persist(s);
     sim.current = s;
     bump({ confirmRestart: false, confirmNew: false, exitAsk: false, saveOpen: false, showingHelp: false });
@@ -3440,7 +3551,7 @@ export default function CowboyJohnsCropDefense() {
     const s = sim.current;
     const el = canvasRef.current;
     if (!s || !el || s.screen === "title" || s.screen === "help") return;
-    if (s.screen === "paused" || s.screen === "victory" || s.screen === "defeat") return;
+    if (s.screen === "paused" || s.screen === "victory" || s.screen === "defeat" || s.screen === "levelup") return;
     if (s.john?.modal) return;
     ev.preventDefault();
     const p = worldFromEvent(el, ev, view.current);
@@ -3492,21 +3603,22 @@ export default function CowboyJohnsCropDefense() {
         if (s.cut) { skipCutscene(s); bump(); return; }
         if (s.placing) { s.placing = null; bump(); return; }
         if (s.selected !== null) { s.selected = null; bump(); return; }
-        if (s.john?.modal) { s.john = null; s.intro = false; bump(); return; }
+        if (s.john?.modal) { dismissTalk(s); bump(); return; }
         s.screen = s.screen === "paused" ? "play" : (s.screen === "play" ? "paused" : s.screen);
         bump();
         return;
       }
       if (!s || s.screen !== "play") {
         if ((e.key === " " || e.key === "Enter") && s && s.screen === "victory") { s.screen = "play"; bump(); e.preventDefault(); }
+        if ((e.key === " " || e.key === "Enter") && s && s.screen === "levelup") { continueLevel(s); bump(); e.preventDefault(); }
         return;
       }
       if (s.cut) {
         if (e.key === " " || e.key === "Enter") { skipCutscene(s); bump(); e.preventDefault(); }
         return;
       }
-      if (s.john?.modal) {
-        if (e.key === " " || e.key === "Enter") { s.john = null; s.intro = false; bump(); e.preventDefault(); }
+      if (s.john) {
+        if (e.key === " " || e.key === "Enter") { dismissTalk(s); bump(); e.preventDefault(); }
         return;
       }
       if (e.key === " " || e.code === "Space") { e.preventDefault(); if (!s.waving) { startWave(s); bump(); } return; }
@@ -3570,7 +3682,7 @@ export default function CowboyJohnsCropDefense() {
       get: () => {
         const s = sim.current;
         if (!s) return { screen: hudRef.current.screen, hasSave: !!loadSaved() };
-        return { screen: s.screen, cash: s.cash, lives: s.lives, wave: s.wave, waving: s.waving, towers: s.towers.length, enemies: s.enemies.length, speed: s.speed, selected: s.selected, placing: s.placing, won40: s.won40, intro: !!s.john?.modal, freeUsed: s.freeUsed, cut: s.cut ? s.cut.phase : null, revealed: s.revealed, who: s.john?.who ?? null, beat: s.john?.beat ?? null };
+        return { screen: s.screen, cash: s.cash, lives: s.lives, wave: s.wave, level: levelOf(s.wave), waveInLevel: waveInLevel(s.wave), waving: s.waving, towers: s.towers.length, enemies: s.enemies.length, speed: s.speed, selected: s.selected, placing: s.placing, won40: s.won40, intro: !!s.john?.modal, freeUsed: s.freeUsed, cut: s.cut ? s.cut.phase : null, revealed: s.revealed, joeHere: s.joeHere, johnHere: s.johnHere, who: s.john?.who ?? null, beat: s.john?.beat ?? null, talk: !!s.john, queued: s.johnQ.length, autoWaveT: s.autoWaveT };
       },
       cash: (n: number) => { const s = sim.current; if (s) { s.cash = n; bump(); } },
       lives: (n: number) => { const s = sim.current; if (s) { s.lives = n; bump(); } },
@@ -3588,7 +3700,7 @@ export default function CowboyJohnsCropDefense() {
       leak: (n?: number) => { const s = sim.current; if (!s) return; const e = spawnEnemy(s, "mite", PLEN - 4); if (n && n > 1) e.leak = n; bump(); },
       save: () => { const s = sim.current; if (!s) return ""; persist(s); return exportCodeFrom(simToSave(s)); },
       load: (code: string) => { const d = parseCode(code); if (!d) return "bad"; sim.current = applySave(d); bump(); return "ok"; },
-      skipIntro: () => { const s = sim.current; if (s) { s.john = null; s.intro = false; bump(); } },
+      skipIntro: () => { const s = sim.current; if (s) { s.john = null; s.johnQ = []; s.intro = false; bump(); } },
       setWave: (n: number) => { const s = sim.current; if (!s) return; s.wave = Math.max(1, n | 0); s.waving = false; s.enemies = []; s.spawnQ = []; applyStoryAfterWave(s); bump(); },
       endWave: () => { const s = sim.current; if (!s) return; s.enemies = []; s.spawnQ = []; s.planes = []; if (s.waving) endWave(s); bump(); },
       sellSelected: () => { const s = sim.current; const tw = s?.towers.find((t) => t.id === s.selected); if (s && tw) { sellTower(s, tw); bump(); } },
@@ -3692,7 +3804,7 @@ export default function CowboyJohnsCropDefense() {
     <div data-testid="hud" style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap", marginBottom: 6 }}>
       <div style={{ fontWeight: 800, fontSize: 16, color: t.text.warning }} data-testid="cash">${hud.cash}</div>
       <div style={{ fontWeight: 800, fontSize: 16, color: hud.lives < 30 ? t.text.danger : t.text.success }} data-testid="lives">🌿 {hud.lives}/{hud.maxLives}</div>
-      <div style={{ fontWeight: 700, fontSize: 14, color: t.text.secondary, flex: 1 }} data-testid="wave">Wave {hud.wave}{hud.wave > MAX_WAVE ? " · Freeplay" : ""}{hud.waving ? " · INCOMING" : ""}</div>
+      <div style={{ fontWeight: 700, fontSize: 14, color: t.text.secondary, flex: 1 }} data-testid="wave">{waveHudLabel(hud.wave, hud.waving)}</div>
       {btn(hud.speed === 1 ? "1×" : hud.speed === 2 ? "2×" : "4×", () => { const s = sim.current; if (s) { s.speed = setSpeedPref(cycleSpeed(s.speed)); if (s.screen !== "defeat") persist(s); bump(); } }, { test: "speed", small: true })}
       {btn(hud.waving ? "Wave running" : "Start Wave", () => { const s = sim.current; if (s && s.screen === "play") { startWave(s); bump(); } }, { tone: "pri", test: "start-wave", disabled: hud.waving || hud.screen !== "play" || !!hud.cut, small: true })}
       {btn("Menu", () => { const s = sim.current; if (hud.confirmRestart) return; if (s && (s.screen === "play" || s.screen === "paused")) { s.screen = s.screen === "paused" ? "play" : "paused"; bump(); } }, { test: "menu", small: true })}
@@ -3739,10 +3851,10 @@ export default function CowboyJohnsCropDefense() {
     </div>
   ) : null;
 
-  const johnBanner = hud.john && !hud.john.modal && playHud && !hud.cut ? (
-    <div data-testid="john-tip" onClick={() => { const s = sim.current; if (s) s.john = null; bump(); }} style={{ display: "flex", gap: 8, alignItems: "center", background: t.bg.elevated, border: `1px solid ${t.border.default}`, borderRadius: 12, padding: 8, marginTop: 6, cursor: "pointer" }}>
+  const johnBanner = hud.john && !hud.john.modal && playHud && !hud.cut && hud.screen !== "levelup" ? (
+    <div data-testid="john-tip" onClick={() => { const s = sim.current; if (s) dismissTalk(s); bump(); }} style={{ display: "flex", gap: 8, alignItems: "center", background: t.bg.elevated, border: `1px solid ${t.border.default}`, borderRadius: 12, padding: 8, marginTop: 6, cursor: "pointer" }}>
       <canvas ref={johnCv} width={80} height={90} style={{ width: 48, height: 54, borderRadius: 8, flex: "0 0 auto", background: t.bg.subtle }} />
-      <div style={{ fontSize: 13, lineHeight: 1.35, flex: 1, fontStyle: hud.john.who === "narrator" ? "italic" : "normal" }}>{hud.john.who === "narrator" ? null : <b style={{ color: hud.john.who === "joe" ? "#c4d080" : t.text.accent }}>{hud.john.who === "joe" ? "Joe: " : "Cowboy John: "}</b>}{hud.john.text}</div>
+      <div style={{ fontSize: 13, lineHeight: 1.35, flex: 1, fontStyle: hud.john.who === "narrator" ? "italic" : "normal" }}>{hud.john.who === "narrator" ? null : <b style={{ color: hud.john.who === "joe" ? "#c4d080" : t.text.accent }}>{hud.john.who === "joe" ? "Joe: " : "Cowboy John: "}</b>}{hud.john.text}<div style={{ fontSize: 11, fontWeight: 700, color: t.text.tertiary, marginTop: 4 }}>Tap to dismiss</div></div>
     </div>
   ) : null;
 
@@ -3821,7 +3933,7 @@ export default function CowboyJohnsCropDefense() {
         </Modal>
       );
     }
-    if (hud.john?.modal && playHud && !hud.cut && hud.screen !== "victory" && hud.screen !== "defeat") {
+    if (hud.john?.modal && playHud && !hud.cut && hud.screen !== "victory" && hud.screen !== "defeat" && hud.screen !== "levelup") {
       return (
         <Modal title={hud.john?.who === "joe" ? (hud.john?.beat === "reveal" ? "Joe" : "Joe") : "Cowboy John"} test={hud.john?.beat === "reveal" ? "joe-reveal" : hud.john?.beat === "joeHello" ? "joe-hello" : "john-intro"}>
           <div style={{ display: "flex", gap: 12, alignItems: "flex-start" }}>
@@ -3830,11 +3942,19 @@ export default function CowboyJohnsCropDefense() {
           </div>
           <div style={{ marginTop: 14 }}>{btn(hud.john?.beat === "reveal" ? "Let's end this" : hud.john?.beat === "joeHello" ? "Alright" : "Let's get to work", () => {
             const s = sim.current; if (!s) { bump(); return; }
-            if (s.john?.beat === "intro") { s.intro = false; say(s, JOE_HELLO, true, 99, "joe", "joeHello"); }
-            else if (s.john?.beat === "reveal") { say(s, JOHN_ON_REVEAL, false, 8, "john"); }
-            else { s.john = null; s.intro = false; }
+            dismissTalk(s);
             bump();
           }, { tone: "pri", grow: true, test: hud.john?.beat === "intro" ? "skip-intro" : hud.john?.beat === "reveal" ? "skip-reveal" : "skip-joe" })}</div>
+        </Modal>
+      );
+    }
+    if (hud.screen === "levelup") {
+      const next = levelOf(hud.wave);
+      const done = Math.max(1, next - 1);
+      return (
+        <Modal title={`Level ${done} complete`} test="level-clear">
+          <div style={{ fontSize: 14, color: t.text.secondary, marginBottom: 12 }}>You held South Field for {WAVES_PER_LEVEL} waves. Level {next} is up next{next === 2 ? " — keep an eye on Joe's rounds." : "."}</div>
+          <div style={{ display: "flex", gap: 8 }}>{btn(`Continue to Level ${next}`, () => { const s = sim.current; if (s) continueLevel(s); bump(); }, { tone: "pri", grow: true, test: "continue-level" })}</div>
         </Modal>
       );
     }
@@ -3911,11 +4031,11 @@ export default function CowboyJohnsCropDefense() {
         <li>Something worse may be waiting at the end of South Field.</li>
       </ul>
       <h3 style={{ color: t.text.warning, fontSize: 16 }}>Waves</h3>
-      <p>40 waves on South Field, then freeplay. Press <b>Start Wave</b> or Space when you're ready. Use 1× / 2× / 4× (or F) when you trust the line. There's room later for more plants and maps.</p>
+      <p>South Field is two levels of exactly 20 waves (40 in all), then freeplay. The HUD shows <b>Level X · Wave N/20</b>. After you clear a level, a short continue screen appears before the next one. Joe's reveal and the final boss stay at the end of Level 2. After a wave clears, the next one starts on its own after a 2–3 second breather — or hit <b>Start Wave</b> / Space to go now. Auto-start waits while dialogue, a cutscene, the pause menu, a level-clear screen, or victory/defeat is up. John and Joe's lines stay on screen until you tap or click them (or press Space / Enter). Use 1× / 2× / 4× (or F) when you trust the line. There's room later for more plants and maps.</p>
       <h3 style={{ color: t.text.warning, fontSize: 16 }}>Saving</h3>
       <p>The farm autosaves between waves on this device. Copy a save code from the menu if you want a backup or to move to another phone.</p>
       <h3 style={{ color: t.text.warning, fontSize: 16 }}>Keys</h3>
-      <p>1–8 select towers, Space starts a wave, F cycles 1× / 2× / 4×, Q / E upgrade path A / B, T cycles targeting, X or Shift+S sells, R asks to restart from wave 1, Esc pauses or backs out. The phone back button asks before leaving.</p>
+      <p>1–8 select towers, Space starts a wave early (or dismisses a line), F cycles 1× / 2× / 4×, Q / E upgrade path A / B, T cycles targeting, X or Shift+S sells, R asks to restart from wave 1, Esc pauses or backs out. The phone back button asks before leaving.</p>
 
     </div>
   );
@@ -3933,7 +4053,7 @@ export default function CowboyJohnsCropDefense() {
         <div style={{ display: "flex", flexDirection: "column", gap: 8, width: "min(360px, 100%)" }}>
           <div style={{ display: "flex", gap: 8, flexWrap: "wrap", width: "100%", alignItems: "stretch" }}>
             {btn("New Game", () => { if (hud.hasSave) bump({ confirmNew: true }); else startNew(); }, { tone: "pri", grow: true, large: true, test: "new-game" })}
-            {hud.hasSave && btn(`Continue (Wave ${Math.max(1, (loadSaved()?.wave ?? 1) | 0)})`, resume, { grow: true, large: true, test: "continue" })}
+            {hud.hasSave && btn(`Continue (${waveHudLabel(Math.max(1, (loadSaved()?.wave ?? 1) | 0))})`, resume, { grow: true, large: true, test: "continue" })}
           </div>
           {btn("How to Play", () => setHud((h) => ({ ...h, screen: "help", showingHelp: true })), { grow: true, test: "how-to-play" })}
           {btn("Paste save code", () => bump({ saveOpen: true }), { grow: true, test: "paste-save" })}

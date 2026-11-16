@@ -13,11 +13,11 @@ It opens fullscreen like an app and works offline after the first visit. Updates
 
 ## How it plays
 
-Pests follow a fixed dirt path toward John's crop. Lives are the plant's health — it visibly wilts as it takes hits. Place towers *off* the path (Sticky Traps sit *on* it), earn cash from kills and from clearing a wave, upgrade along two branches (up to 4/2 or 2/4), and sell for a 70% refund. 40 waves, then freeplay. A Locust Swarm King arrives every 10 waves.
+Pests follow a fixed dirt path toward John's crop. Lives are the plant's health — it visibly wilts as it takes hits. Place towers *off* the path (Sticky Traps sit *on* it), earn cash from kills and from clearing a wave, upgrade along two branches (up to 4/2 or 2/4), and sell for a 70% refund. Two levels of 20 waves (40 in all), then freeplay. A Locust Swarm King arrives every 10 waves. After a wave clears, the next one starts on its own after a short breather; you can still hit Start Wave or Space to go now. John and Joe's lines stay up until you tap to dismiss them.
 
 The farm autosaves between waves on this device. Copy a save code from the menu for a backup.
 
-Cowboy John is your boss, and other hands around South Field have a routine of their own. Listen between waves — the 40-wave campaign has a story.
+Cowboy John is your boss, and other hands around South Field have a routine of their own. Listen between waves — the two-level campaign has a story, with Joe's reveal at the end of Level 2.
 
 ## Towers
 
@@ -36,7 +36,7 @@ Spider mites, fast aphids, armored beetles, split caterpillars (they drop inchwo
 
 ## Keys
 
-1–8 select towers, Space starts a wave, F toggles 2× speed, Q / E upgrade path A / B, T cycles targeting, X (or Shift+S) sells, R asks to restart from wave 1, Esc pauses or backs out. The phone back button asks before leaving.
+1–8 select towers, Space starts a wave early (or dismisses a line), F cycles 1× / 2× / 4×, Q / E upgrade path A / B, T cycles targeting, X (or Shift+S) sells, R asks to restart from wave 1, Esc pauses or backs out. The phone back button asks before leaving.
 
 ## Develop
 
