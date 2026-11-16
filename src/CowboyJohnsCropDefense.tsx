@@ -1035,46 +1035,6 @@ function drawGrassDetails(c: CanvasRenderingContext2D): void {
   }
 }
 
-function drawGrassPad(c: CanvasRenderingContext2D, w: number, h: number): void {
-  const ground = c.createLinearGradient(0, 0, 0, h);
-  ground.addColorStop(0, "#2f6e28");
-  ground.addColorStop(0.5, "#2a6624");
-  ground.addColorStop(1, "#245820");
-  c.fillStyle = ground;
-  c.fillRect(0, 0, w, h);
-  const rng = mulberry(91);
-  const patches = ["#245820", "#2e6e28", "#1e4e1c", "#347a2c", "#286424", "#3a8430"];
-  for (let i = 0; i < 90; i++) {
-    c.fillStyle = patches[i % patches.length];
-    c.globalAlpha = 0.22 + rng() * 0.28;
-    c.beginPath(); c.ellipse(rng() * w, rng() * h, 8 + rng() * 22, 5 + rng() * 14, rng() * 3, 0, Math.PI * 2); c.fill();
-    c.globalAlpha = 1;
-  }
-  for (let i = 0; i < 120; i++) {
-    const x = rng() * w, y = rng() * h;
-    c.fillStyle = rng() > 0.5 ? "rgba(16,48,14,0.18)" : "rgba(200,240,150,0.10)";
-    c.fillRect(x, y, 1 + rng() * 1.8, 1 + rng() * 1.8);
-  }
-  for (let i = 0; i < 560; i++) {
-    const x = rng() * w, y = 4 + rng() * (h - 4);
-    const col = GRASS_COLS[i % GRASS_COLS.length];
-    const hh = 5 + rng() * 11;
-    const lean = (rng() - 0.5) * 4.2;
-    const n = 2 + (i % 3);
-    for (let k = 0; k < n; k++) drawGrassBlade(c, x + (k - (n - 1) / 2) * 1.3, y, hh + rng() * 3, col, lean + (k - 1) * 1.05, 0.8 + rng() * 0.6);
-  }
-}
-
-function fillGrassMargins(c: CanvasRenderingContext2D, cssW: number, cssH: number, dpr: number): void {
-  const pw = cssW * dpr, ph = cssH * dpr;
-  if (SPR.pad) {
-    const pat = c.createPattern(SPR.pad, "repeat");
-    if (pat) { c.fillStyle = pat; c.fillRect(0, 0, pw, ph); return; }
-  }
-  c.fillStyle = "#2a6624";
-  c.fillRect(0, 0, pw, ph);
-}
-
 function drawFarmBg(c: CanvasRenderingContext2D): void {
   const ground = c.createLinearGradient(0, 0, 0, WH);
   ground.addColorStop(0, "#2f6e28");
@@ -2255,7 +2215,7 @@ function drawBetrayalSwarm(c: CanvasRenderingContext2D, t: number): void {
 }
 
 const SPR: {
-  farm?: HTMLCanvasElement; grass: HTMLCanvasElement[]; pad?: HTMLCanvasElement; plant: HTMLCanvasElement[]; enemy: Partial<Record<EnemyId, HTMLCanvasElement[]>>;
+  farm?: HTMLCanvasElement; grass: HTMLCanvasElement[]; plant: HTMLCanvasElement[]; enemy: Partial<Record<EnemyId, HTMLCanvasElement[]>>;
   scale: number; hd: boolean;
 } = { grass: [], plant: [], enemy: {}, scale: 0, hd: true };
 let FARM_PRESENT: { img: HTMLCanvasElement; dw: number; dh: number; src: HTMLCanvasElement } | null = null;
@@ -2280,7 +2240,6 @@ function ensureSprites(force = false): void {
   if (!force && SPR.farm && SPR.hd === hd && SPR.scale === scale) return;
   SPR.farm = undefined;
   SPR.grass = [];
-  SPR.pad = undefined;
   SPR.plant = [];
   SPR.enemy = {};
   SPR.hd = hd;
@@ -2306,17 +2265,6 @@ function ensureSprites(force = false): void {
       drawGrassBlades(gc, lean, "blades");
     }
     SPR.grass.push(g);
-  }
-  {
-    const ps = 192;
-    const pad = makeC(Math.round(ps * scale), Math.round(ps * scale));
-    const pc = pad.getContext("2d");
-    if (pc) {
-      prepCtx(pc, true);
-      pc.scale(scale, scale);
-      drawGrassPad(pc, ps, ps);
-    }
-    SPR.pad = pad;
   }
   for (let i = 0; i < 5; i++) {
     const p = makeC(Math.round(140 * scale), Math.round(140 * scale));
@@ -3117,8 +3065,8 @@ function drawFrame(c: CanvasRenderingContext2D, s: Sim, cssW: number, cssH: numb
   const oy = (cssH - WH * scale) / 2;
   c.setTransform(1, 0, 0, 1, 0, 0);
   c.clearRect(0, 0, cssW * dpr, cssH * dpr);
-  // Leftover viewport around the 1000×800 field is more grass, not letterbox bars.
-  fillGrassMargins(c, cssW, cssH, dpr);
+  c.fillStyle = "#1c140c";
+  c.fillRect(0, 0, cssW * dpr, cssH * dpr);
   const shx = (s.shake ? (Math.random() - 0.5) * 10 * s.shake : 0);
   const shy = (s.shake ? (Math.random() - 0.5) * 8 * s.shake : 0);
   c.setTransform(dpr * scale, 0, 0, dpr * scale, dpr * (ox + shx), dpr * (oy + shy));
@@ -3793,8 +3741,6 @@ export default function CowboyJohnsCropDefense() {
   const padBot = "max(8px, env(safe-area-inset-bottom))";
   const padL = "max(8px, env(safe-area-inset-left))";
   const padR = "max(8px, env(safe-area-inset-right))";
-  const playHud = hud.screen !== "title" && hud.screen !== "help";
-  const playFull = playHud && !hud.showingHelp;
   const t = theme;
   const sel = sim.current && hud.selected !== null ? sim.current.towers.find((tw) => tw.id === hud.selected) : undefined;
 
@@ -3821,9 +3767,9 @@ export default function CowboyJohnsCropDefense() {
 
   const root: CSSProperties = {
     height: "100dvh",
-    background: playFull ? "#245820" : t.bg.base, color: t.text.primary, fontFamily: t.font.family,
+    background: t.bg.base, color: t.text.primary, fontFamily: t.font.family,
     display: "flex", flexDirection: "column", overflow: "hidden",
-    paddingTop: playFull ? 0 : padTop, paddingBottom: playFull ? 0 : padBot, paddingLeft: playFull ? 0 : padL, paddingRight: playFull ? 0 : padR,
+    paddingTop: padTop, paddingBottom: padBot, paddingLeft: padL, paddingRight: padR,
     boxSizing: "border-box", userSelect: "none",
   } as CSSProperties;
 
@@ -3852,23 +3798,10 @@ export default function CowboyJohnsCropDefense() {
     );
   };
 
-  const hudGlass: CSSProperties = {
-    background: "rgba(20,14,8,0.78)",
-    border: "1px solid rgba(138,98,56,0.45)",
-    boxShadow: "0 8px 24px rgba(0,0,0,0.35)",
-    backdropFilter: "blur(8px)",
-    WebkitBackdropFilter: "blur(8px)",
-  } as CSSProperties;
+  const playHud = hud.screen !== "title" && hud.screen !== "help";
 
   const topBar = playHud ? (
-    <div data-testid="hud" style={{
-      position: "absolute", top: 0, left: 0, right: land ? 168 : 0, zIndex: 8,
-      display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap",
-      paddingTop: padTop, paddingLeft: padL, paddingRight: land ? 8 : padR, paddingBottom: 8,
-      ...hudGlass, borderTop: "none", borderLeft: "none", borderRight: land ? "none" : undefined,
-      borderRadius: land ? "0 0 14px 0" : "0 0 14px 14px",
-      boxSizing: "border-box", pointerEvents: "auto",
-    }}>
+    <div data-testid="hud" style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap", marginBottom: 6 }}>
       <div style={{ fontWeight: 800, fontSize: 16, color: t.text.warning }} data-testid="cash">${hud.cash}</div>
       <div style={{ fontWeight: 800, fontSize: 16, color: hud.lives < 30 ? t.text.danger : t.text.success }} data-testid="lives">🌿 {hud.lives}/{hud.maxLives}</div>
       <div style={{ fontWeight: 700, fontSize: 14, color: t.text.secondary, flex: 1 }} data-testid="wave">{waveHudLabel(hud.wave, hud.waving)}</div>
@@ -3880,12 +3813,7 @@ export default function CowboyJohnsCropDefense() {
   ) : null;
 
   const selPanel = sel && playHud && hud.screen === "play" && !hud.cut ? (
-    <div data-testid="upgrade-panel" style={{
-      ...(land ? { position: "absolute" as const, zIndex: 8, left: 8, right: 176, bottom: padBot, maxHeight: "42%" } : { maxHeight: "36%" }),
-      overflow: "auto", pointerEvents: "auto",
-      ...hudGlass, background: "rgba(28,20,12,0.9)", borderRadius: 14, padding: 10,
-      boxSizing: "border-box",
-    }}>
+    <div data-testid="upgrade-panel" style={{ background: t.bg.elevated, border: `1px solid ${t.border.default}`, borderRadius: 14, padding: 10, marginTop: 6 }}>
       <div style={{ display: "flex", gap: 6, alignItems: "center", marginBottom: 6, flexWrap: "wrap" }}>
         <div style={{ fontWeight: 800, flex: 1, fontSize: 14 }}>{TDEF[sel.kind].name}  {sel.a}/{sel.b}</div>
         {btn(`Target: ${sel.tgt}`, () => { sel.tgt = TARGETS[(TARGETS.indexOf(sel.tgt) + 1) % TARGETS.length]; bump(); }, { small: true, test: "targeting" })}
@@ -3918,29 +3846,13 @@ export default function CowboyJohnsCropDefense() {
   ) : null;
 
   const shop = playHud && hud.screen === "play" && !hud.cut ? (
-    <div data-testid="shop" style={land ? {
-      position: "absolute", top: 0, right: 0, bottom: 0, width: 168, zIndex: 8, pointerEvents: "auto",
-      display: "flex", flexDirection: "column", gap: 6, overflowY: "auto", overflowX: "hidden",
-      paddingTop: padTop, paddingRight: padR, paddingBottom: padBot, paddingLeft: 8,
-      ...hudGlass, borderRadius: 0, borderTop: "none", borderRight: "none", borderBottom: "none",
-      boxSizing: "border-box",
-    } : {
-      position: "absolute", left: 0, right: 0, bottom: 0, zIndex: 8, pointerEvents: "auto",
-      display: "flex", flexDirection: "row", gap: 6, overflowX: "auto", overflowY: "hidden",
-      paddingTop: 8, paddingLeft: padL, paddingRight: padR, paddingBottom: padBot,
-      ...hudGlass, borderRadius: "14px 14px 0 0", borderBottom: "none", borderLeft: "none", borderRight: "none",
-      boxSizing: "border-box",
-    }}>
+    <div data-testid="shop" style={{ display: "flex", flexDirection: land ? "column" : "row", gap: 6, overflowX: land ? "hidden" : "auto", overflowY: land ? "auto" : "hidden", maxHeight: land ? "100%" : undefined, paddingBottom: 2 }}>
       {TOWERS.map(shopBtn)}
     </div>
   ) : null;
 
   const johnBanner = hud.john && !hud.john.modal && playHud && !hud.cut && hud.screen !== "levelup" ? (
-    <div data-testid="john-tip" onClick={() => { const s = sim.current; if (s) dismissTalk(s); bump(); }} style={{
-      display: "flex", gap: 8, alignItems: "center", cursor: "pointer", pointerEvents: "auto",
-      ...hudGlass, background: "rgba(28,20,12,0.9)", borderRadius: 12, padding: 8,
-      boxSizing: "border-box",
-    }}>
+    <div data-testid="john-tip" onClick={() => { const s = sim.current; if (s) dismissTalk(s); bump(); }} style={{ display: "flex", gap: 8, alignItems: "center", background: t.bg.elevated, border: `1px solid ${t.border.default}`, borderRadius: 12, padding: 8, marginTop: 6, cursor: "pointer" }}>
       <canvas ref={johnCv} width={80} height={90} style={{ width: 48, height: 54, borderRadius: 8, flex: "0 0 auto", background: t.bg.subtle }} />
       <div style={{ fontSize: 13, lineHeight: 1.35, flex: 1, fontStyle: hud.john.who === "narrator" ? "italic" : "normal" }}>{hud.john.who === "narrator" ? null : <b style={{ color: hud.john.who === "joe" ? "#c4d080" : t.text.accent }}>{hud.john.who === "joe" ? "Joe: " : "Cowboy John: "}</b>}{hud.john.text}<div style={{ fontSize: 11, fontWeight: 700, color: t.text.tertiary, marginTop: 4 }}>Tap to dismiss</div></div>
     </div>
@@ -4170,9 +4082,9 @@ export default function CowboyJohnsCropDefense() {
 
   return (
     <div style={root}>
-      <style>{`html,body,#root{height:100%;background:${playFull ? "#245820" : t.bg.base}} textarea{color:${t.text.primary}}`}</style>
+      <style>{`html,body,#root{height:100%;background:${t.bg.base}} textarea{color:${t.text.primary}}`}</style>
       {(hud.startBanner || hud.toast) && (
-        <div style={{ position: "fixed", top: playFull ? (land ? "max(60px, calc(env(safe-area-inset-top) + 52px))" : "max(148px, calc(env(safe-area-inset-top) + 140px))") : "max(12px, env(safe-area-inset-top))", left: "50%", transform: "translateX(-50%)", zIndex: 45, display: "flex", flexDirection: "column", alignItems: "center", gap: 8, pointerEvents: "none", width: "min(340px, calc(100% - 24px))", boxSizing: "border-box" }}>
+        <div style={{ position: "fixed", top: "max(12px, env(safe-area-inset-top))", left: "50%", transform: "translateX(-50%)", zIndex: 45, display: "flex", flexDirection: "column", alignItems: "center", gap: 8, pointerEvents: "none", width: "min(340px, calc(100% - 24px))", boxSizing: "border-box" }}>
           {hud.startBanner ? <div data-testid="start-banner" style={{ width: "100%", boxSizing: "border-box", textAlign: "center", background: t.fill.primary, color: t.text.onPrimary, border: `2px solid ${t.border.focus}`, borderRadius: 14, padding: "10px 16px", fontFamily: "Georgia, serif", fontSize: 18, fontWeight: 800, letterSpacing: 0.3, boxShadow: "0 8px 24px rgba(0,0,0,0.45)" }}>{hud.startBanner}</div> : null}
           {hud.toast ? <div data-testid="toast" style={{ background: t.bg.elevated, border: `1px solid ${t.border.focus}`, borderRadius: 12, padding: "8px 14px", fontWeight: 700, boxShadow: "0 8px 24px rgba(0,0,0,0.4)", color: t.text.primary }}>{hud.toast}</div> : null}
         </div>
@@ -4180,48 +4092,46 @@ export default function CowboyJohnsCropDefense() {
       {hud.screen === "title" && !hud.showingHelp && titleBody}
       {(hud.screen === "help" || hud.showingHelp) && <div style={{ flex: 1, display: "flex", flexDirection: "column", minHeight: 0, padding: 8 }}>{helpBody}</div>}
       {playHud && !hud.showingHelp && (
-        <div style={{ flex: 1, position: "relative", minHeight: 0, minWidth: 0 }}>
-          <canvas
-            ref={canvasRef}
-            data-testid="field"
-            style={{ position: "absolute", inset: 0, width: "100%", height: "100%", display: "block", touchAction: "none", zIndex: 0 }}
-            onPointerDown={(e) => { (e.target as HTMLCanvasElement).setPointerCapture(e.pointerId); onCanvasPtr(e, "down"); }}
-            onPointerMove={(e) => onCanvasPtr(e, "move")}
-            onPointerUp={(e) => onCanvasPtr(e, "up")}
-            onPointerCancel={() => { const s = sim.current; if (s) s.hover = null; }}
-            onContextMenu={(e) => e.preventDefault()}
-          />
-          {hud.cut && (
-            <div data-testid={hud.cut.phase === 0 ? "betrayal-cut" : (hud.john?.beat === "reveal" ? "joe-reveal" : "john-react")}
-              onClick={() => { const s = sim.current; if (s) { skipCutscene(s); bump(); } }}
-              style={{ position: "absolute", left: 8, right: land ? 176 : 8, bottom: land ? 8 : 120, zIndex: 9, display: "flex", flexDirection: "column", alignItems: "center", gap: 6, cursor: "pointer" }}>
-              <div style={{ background: "rgba(20,12,4,0.78)", color: "#f3e6c8", padding: "4px 12px", borderRadius: 999, fontSize: 12, fontWeight: 800, border: "1px solid #8a6238" }}>Tap to skip</div>
-              {hud.cut.phase > 0 && hud.john ? (
-                <div style={{ width: "100%", background: "rgba(42,30,18,0.94)", border: "1px solid #8a6238", borderRadius: 14, padding: 10, display: "flex", gap: 10, boxShadow: "0 10px 28px rgba(0,0,0,0.45)" }}>
-                  <canvas ref={johnCv} width={160} height={180} style={{ width: 72, height: 82, borderRadius: 10, flex: "0 0 auto", background: t.bg.subtle }} />
-                  <div style={{ flex: 1, minWidth: 0 }}>
-                    <div style={{ fontWeight: 800, fontSize: 16, color: "#f3e6c8", fontFamily: "Georgia, serif", marginBottom: 4 }}>{hud.john.who === "joe" ? "Joe" : "Cowboy John"}</div>
-                    <div style={{ fontSize: 13, lineHeight: 1.4, color: "#f3e6c8" }}>{hud.john.text}</div>
-                  </div>
+        <div style={{ flex: 1, display: "flex", flexDirection: land ? "row" : "column", minHeight: 0, gap: 8 }}>
+          <div style={{ flex: "1 1 auto", display: "flex", flexDirection: "column", minWidth: 0, minHeight: 0 }}>
+            {topBar}
+            <div style={{ width: "100%", aspectRatio: `${WW} / ${WH}`, flex: "0 1 auto", minHeight: 140, maxHeight: land ? "100%" : "min(58dvh, calc(100dvw * 0.8))", position: "relative", borderRadius: 14, overflow: "hidden", border: `1px solid ${t.border.default}`, background: "#1c140c" }}>
+              <canvas
+                ref={canvasRef}
+                data-testid="field"
+                style={{ width: "100%", height: "100%", display: "block", touchAction: "none" }}
+                onPointerDown={(e) => { (e.target as HTMLCanvasElement).setPointerCapture(e.pointerId); onCanvasPtr(e, "down"); }}
+                onPointerMove={(e) => onCanvasPtr(e, "move")}
+                onPointerUp={(e) => onCanvasPtr(e, "up")}
+                onPointerCancel={() => { const s = sim.current; if (s) s.hover = null; }}
+                onContextMenu={(e) => e.preventDefault()}
+              />
+              {hud.cut && (
+                <div data-testid={hud.cut.phase === 0 ? "betrayal-cut" : (hud.john?.beat === "reveal" ? "joe-reveal" : "john-react")}
+                  onClick={() => { const s = sim.current; if (s) { skipCutscene(s); bump(); } }}
+                  style={{ position: "absolute", left: 8, right: 8, bottom: 8, zIndex: 6, display: "flex", flexDirection: "column", alignItems: "center", gap: 6, cursor: "pointer" }}>
+                  <div style={{ background: "rgba(20,12,4,0.78)", color: "#f3e6c8", padding: "4px 12px", borderRadius: 999, fontSize: 12, fontWeight: 800, border: "1px solid #8a6238" }}>Tap to skip</div>
+                  {hud.cut.phase > 0 && hud.john ? (
+                    <div style={{ width: "100%", background: "rgba(42,30,18,0.94)", border: "1px solid #8a6238", borderRadius: 14, padding: 10, display: "flex", gap: 10, boxShadow: "0 10px 28px rgba(0,0,0,0.45)" }}>
+                      <canvas ref={johnCv} width={160} height={180} style={{ width: 72, height: 82, borderRadius: 10, flex: "0 0 auto", background: t.bg.subtle }} />
+                      <div style={{ flex: 1, minWidth: 0 }}>
+                        <div style={{ fontWeight: 800, fontSize: 16, color: "#f3e6c8", fontFamily: "Georgia, serif", marginBottom: 4 }}>{hud.john.who === "joe" ? "Joe" : "Cowboy John"}</div>
+                        <div style={{ fontSize: 13, lineHeight: 1.4, color: "#f3e6c8" }}>{hud.john.text}</div>
+                      </div>
+                    </div>
+                  ) : (
+                    <div style={{ width: "100%", background: "rgba(42,30,18,0.92)", border: "1px solid #8a6238", borderRadius: 14, padding: 10, color: "#f3e6c8", fontSize: 14, fontWeight: 700, textAlign: "center" }}>A swarm is pouring over the hillside...</div>
+                  )}
                 </div>
-              ) : (
-                <div style={{ width: "100%", background: "rgba(42,30,18,0.92)", border: "1px solid #8a6238", borderRadius: 14, padding: 10, color: "#f3e6c8", fontSize: 14, fontWeight: 700, textAlign: "center" }}>A swarm is pouring over the hillside...</div>
               )}
             </div>
-          )}
-          {topBar}
-          <div style={{
-            position: "absolute", zIndex: 8, left: land ? 8 : 0, right: land ? 176 : 0,
-            bottom: 0, paddingLeft: land ? 0 : padL, paddingRight: land ? 0 : padR,
-            paddingBottom: land ? padBot : "calc(112px + env(safe-area-inset-bottom))",
-            display: "flex", flexDirection: "column", gap: 8,
-            pointerEvents: "none", boxSizing: "border-box",
-          }}>
-            <div style={{ pointerEvents: "auto" }}>{johnBanner}</div>
-            <div style={{ pointerEvents: "auto" }}>{!land && selPanel}</div>
+            {johnBanner}
+            {!land && selPanel}
           </div>
-          {shop}
-          {land && selPanel}
+          <div style={{ flex: land ? "0 0 168px" : "0 0 auto", display: "flex", flexDirection: "column", minHeight: 0 }}>
+            {shop}
+            {land && selPanel}
+          </div>
         </div>
       )}
       {overlay()}
