@@ -13,7 +13,7 @@ It opens fullscreen like an app and works offline after the first visit. Updates
 
 ## How it plays
 
-Pests follow a fixed dirt path toward John's crop. Lives are the plant's health — it visibly wilts as it takes hits. Place towers *off* the path (Sticky Traps sit *on* it), earn cash from kills and from clearing a wave, upgrade along two branches (up to 4/2 or 2/4), and sell for a 70% refund. 40 waves, then freeplay. A Locust Swarm King arrives every 10 waves.
+Pests follow a fixed dirt path toward John's crop. Lives are the plant's health — it visibly wilts as it takes hits. Place towers *off* the path (Sticky Traps sit *on* it), earn cash from kills and from clearing a wave, upgrade along two branches (up to 4/2 or 2/4), and sell for a 100% refund of the base cost and every upgrade. 40 waves, then freeplay. A Locust Swarm King arrives every 10 waves.
 
 The farm autosaves between waves on this device. Copy a save code from the menu for a backup.
 

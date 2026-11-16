@@ -11,6 +11,7 @@ type TowerId = "ladybug" | "neem" | "sticky" | "scarecrow" | "mantis" | "predato
 type EnemyId = "mite" | "aphid" | "beetle" | "caterpillar" | "inchworm" | "gnat" | "mildew" | "queen" | "locust" | "king" | "joe";
 type Speaker = "john" | "joe" | "narrator";
 type TargetMode = "first" | "last" | "close" | "strong";
+type PendingPlace = { kind: TowerId; x: number; y: number; okX: number; okY: number; drag: boolean };
 type Pt = { x: number; y: number };
 
 interface Upg { name: string; desc: string; cost: number }
@@ -58,13 +59,13 @@ interface Sim {
   screen: Screen; mapId: string; wave: number; waving: boolean; cash: number; lives: number; maxLives: number;
   speed: number; towers: Tower[]; enemies: Enemy[]; shots: Shot[]; planes: Plane[]; floats: FloatT[]; fx: Fx[];
   spawnQ: { at: number; kind: EnemyId }[]; waveT: number; selected: number | null; placing: TowerId | null;
-  hover: Pt | null; john: JohnMsg | null; intro: boolean; won40: boolean; time: number; uid: number;
+  pendingPlace: PendingPlace | null; hover: Pt | null; john: JohnMsg | null; intro: boolean; won40: boolean; time: number; uid: number;
   seen: EnemyId[]; dirty: boolean; over: boolean; pendingEnd: number; shake: number;
   revealed: boolean; joeHere: boolean; johnHere: boolean;
   freeUsed: boolean; cut: Cutscene | null;
 }
 
-const WW = 1000, WH = 800, PATH_W = 44, START_CASH = 0, START_LIVES = 100, SELL = 0.7, MAX_WAVE = 40, SAVE_KEY = "cjcd-save-v1", CODE_PFX = "CJ1.";
+const WW = 1000, WH = 800, PATH_W = 44, START_CASH = 0, START_LIVES = 100, MAX_WAVE = 40, SAVE_KEY = "cjcd-save-v1", CODE_PFX = "CJ1.";
 const TARGETS: TargetMode[] = ["first", "last", "close", "strong"];
 const MAP_ID = "johns-south-field";
 
@@ -89,47 +90,48 @@ const NOBUILD: { x: number; y: number; r?: number; w?: number; h?: number }[] = 
 ];
 
 const TOWERS: TowerDef[] = [
-  { id: "ladybug", name: "Ladybug Nest", short: "Ladybug", cost: 175, role: "Eats mites and small pests.", onPath: false, key: "1", color: "#c43c2c",
+  { id: "ladybug", name: "Ladybug Nest", short: "Ladybug", cost: 140, role: "Eats mites and small pests.", onPath: false, key: "1", color: "#c43c2c",
     paths: [
-      [{ name: "Hungry Brood", desc: "Ladybugs strike 30% faster.", cost: 150 }, { name: "Swarm", desc: "Two ladybugs hunt at once.", cost: 320 }, { name: "Colony", desc: "Three hunters and a wider range.", cost: 800 }, { name: "Blight Feast", desc: "Tiny pests are snapped up instantly.", cost: 2200 }],
-      [{ name: "Strong Jaws", desc: "+4 damage per bite.", cost: 160 }, { name: "Iron Mandibles", desc: "Chew through armor.", cost: 380 }, { name: "Sky Leap", desc: "Ladybugs can pounce on flying pests.", cost: 950 }, { name: "Apex Predator", desc: "Brutal bites that finish wounded foes.", cost: 2600 }],
+      [{ name: "Hungry Brood", desc: "Ladybugs strike 30% faster.", cost: 130 }, { name: "Swarm", desc: "Two ladybugs hunt at once.", cost: 270 }, { name: "Colony", desc: "Three hunters and a wider range.", cost: 680 }, { name: "Blight Feast", desc: "Tiny pests are snapped up instantly.", cost: 1870 }],
+      [{ name: "Strong Jaws", desc: "+4 damage per bite.", cost: 135 }, { name: "Iron Mandibles", desc: "Chew through armor.", cost: 325 }, { name: "Sky Leap", desc: "Ladybugs can pounce on flying pests.", cost: 810 }, { name: "Apex Predator", desc: "Brutal bites that finish wounded foes.", cost: 2210 }],
     ] },
-  { id: "neem", name: "Neem Oil Sprayer", short: "Neem", cost: 250, role: "Cone of oil that slows a pack.", onPath: false, key: "2", color: "#5a8a2a",
+  { id: "neem", name: "Neem Oil Sprayer", short: "Neem", cost: 200, role: "Cone of oil that slows a pack.", onPath: false, key: "2", color: "#5a8a2a",
     paths: [
-      [{ name: "Wide Fan", desc: "A much broader spray cone.", cost: 180 }, { name: "Heavy Mist", desc: "The mist reaches flying pests and clings longer.", cost: 400 }, { name: "Sap Flood", desc: "Pests crawl through heavy, lasting sap.", cost: 950 }, { name: "Amber Prison", desc: "Soaked pests are briefly stuck fast.", cost: 2800 }],
-      [{ name: "Caustic Mix", desc: "The oil burns as it coats.", cost: 200 }, { name: "Toxin Vat", desc: "Stronger burn, longer tick.", cost: 450 }, { name: "Blight Sight", desc: "Reveals mildew and scorches it.", cost: 1000 }, { name: "Harvest Burn", desc: "A devastating, widening spray.", cost: 3000 }],
+      [{ name: "Wide Fan", desc: "A much broader spray cone.", cost: 155 }, { name: "Heavy Mist", desc: "The mist reaches flying pests and clings longer.", cost: 340 }, { name: "Sap Flood", desc: "Pests crawl through heavy, lasting sap.", cost: 810 }, { name: "Amber Prison", desc: "Soaked pests are briefly stuck fast.", cost: 2380 }],
+      [{ name: "Caustic Mix", desc: "The oil burns as it coats.", cost: 170 }, { name: "Toxin Vat", desc: "Stronger burn, longer tick.", cost: 385 }, { name: "Blight Sight", desc: "Reveals mildew and scorches it.", cost: 850 }, { name: "Harvest Burn", desc: "A devastating, widening spray.", cost: 2550 }],
     ] },
-  { id: "sticky", name: "Sticky Trap", short: "Trap", cost: 60, role: "On-path glue. Slows, then wears out.", onPath: true, key: "3", color: "#e0a84a",
+  { id: "sticky", name: "Sticky Trap", short: "Trap", cost: 50, role: "On-path glue. Slows, then wears out.", onPath: true, key: "3", color: "#e0a84a",
     paths: [
-      [{ name: "Extra Glue", desc: "Holds twice as many pests.", cost: 80 }, { name: "Tarpit", desc: "A deep, lasting pit of sap.", cost: 200 }, { name: "Webbed Pit", desc: "Pests that step in are briefly stopped.", cost: 500 }, { name: "Endless Sap", desc: "The trap no longer wears out.", cost: 1200 }],
-      [{ name: "Barbs", desc: "Glue-covered thorns deal damage.", cost: 80 }, { name: "Spike Pot", desc: "Heavier spikes, some armor bite.", cost: 220 }, { name: "Bear Trap", desc: "A sharp snap stuns the caught.", cost: 550 }, { name: "Thresher", desc: "A grinding damage zone on the path.", cost: 1400 }],
+      [{ name: "Extra Glue", desc: "Holds twice as many pests.", cost: 70 }, { name: "Tarpit", desc: "A deep, lasting pit of sap.", cost: 170 }, { name: "Webbed Pit", desc: "Pests that step in are briefly stopped.", cost: 425 }, { name: "Endless Sap", desc: "The trap no longer wears out.", cost: 1020 }],
+      [{ name: "Barbs", desc: "Glue-covered thorns deal damage.", cost: 70 }, { name: "Spike Pot", desc: "Heavier spikes, some armor bite.", cost: 185 }, { name: "Bear Trap", desc: "A sharp snap stuns the caught.", cost: 470 }, { name: "Thresher", desc: "A grinding damage zone on the path.", cost: 1190 }],
     ] },
-  { id: "scarecrow", name: "Scarecrow Gunslinger", short: "Gunslinger", cost: 425, role: "Long-range revolver, one shot at a time.", onPath: false, key: "4", color: "#c47a2c",
+  { id: "scarecrow", name: "Scarecrow Gunslinger", short: "Gunslinger", cost: 340, role: "Long-range revolver, one shot at a time.", onPath: false, key: "4", color: "#c47a2c",
     paths: [
-      [{ name: "Quick Draw", desc: "Fires much faster.", cost: 250 }, { name: "Fan the Hammer", desc: "Faster still, and can wing flying pests.", cost: 550 }, { name: "Dual Wield", desc: "Two revolvers, two shots.", cost: 1300 }, { name: "Ricochet", desc: "Bullets bounce to a nearby pest.", cost: 3200 }],
-      [{ name: "Long Barrel", desc: "More range and punch.", cost: 280 }, { name: "Hollow Point", desc: "Pierces armor.", cost: 650 }, { name: "Deadeye", desc: "Sees mildew. Chance of a critical shot.", cost: 1500 }, { name: "High Noon", desc: "A long, heavy snipe.", cost: 3800 }],
+      [{ name: "Quick Draw", desc: "Fires much faster.", cost: 215 }, { name: "Fan the Hammer", desc: "Faster still, and can wing flying pests.", cost: 470 }, { name: "Dual Wield", desc: "Two revolvers, two shots.", cost: 1105 }, { name: "Ricochet", desc: "Bullets bounce to a nearby pest.", cost: 2720 }],
+      [{ name: "Long Barrel", desc: "More range and punch.", cost: 240 }, { name: "Hollow Point", desc: "Pierces armor.", cost: 555 }, { name: "Deadeye", desc: "Sees mildew. Chance of a critical shot.", cost: 1275 }, { name: "High Noon", desc: "A long, heavy snipe.", cost: 3230 }],
     ] },
-  { id: "mantis", name: "Praying Mantis Post", short: "Mantis", cost: 350, role: "Short-range melee slashes.", onPath: false, key: "5", color: "#6a9a3a",
+  { id: "mantis", name: "Praying Mantis Post", short: "Mantis", cost: 280, role: "Short-range melee slashes.", onPath: false, key: "5", color: "#6a9a3a",
     paths: [
-      [{ name: "Fast Claws", desc: "Strikes much faster.", cost: 220 }, { name: "Cleave", desc: "Hits up to three pests in reach.", cost: 500 }, { name: "Whirlwind", desc: "Slices every pest in range.", cost: 1100 }, { name: "Dance of Blades", desc: "A blur of claws and a longer reach.", cost: 2800 }],
-      [{ name: "Piercing Hook", desc: "Heavier blades.", cost: 250 }, { name: "Armor Crack", desc: "Rips through shells.", cost: 600 }, { name: "Execute", desc: "Finishes wounded (non-boss) pests.", cost: 1400 }, { name: "Reaper", desc: "Devastating slashes, even on bosses.", cost: 3500 }],
+      [{ name: "Fast Claws", desc: "Strikes much faster.", cost: 185 }, { name: "Cleave", desc: "Hits up to three pests in reach.", cost: 425 }, { name: "Whirlwind", desc: "Slices every pest in range.", cost: 935 }, { name: "Dance of Blades", desc: "A blur of claws and a longer reach.", cost: 2380 }],
+      [{ name: "Piercing Hook", desc: "Heavier blades.", cost: 215 }, { name: "Armor Crack", desc: "Rips through shells.", cost: 510 }, { name: "Execute", desc: "Finishes wounded (non-boss) pests.", cost: 1190 }, { name: "Reaper", desc: "Devastating slashes, even on bosses.", cost: 2975 }],
     ] },
-  { id: "predatory", name: "Predatory Mite Release", short: "Predators", cost: 300, role: "Releases mites that chew over time.", onPath: false, key: "6", color: "#8a5a2a",
+  { id: "predatory", name: "Predatory Mite Release", short: "Predators", cost: 240, role: "Releases mites that chew over time.", onPath: false, key: "6", color: "#8a5a2a",
     paths: [
-      [{ name: "Brood Box", desc: "Two stacks of mites at once.", cost: 200 }, { name: "Infest", desc: "Three stacks, applied faster.", cost: 480 }, { name: "Plague Jump", desc: "Mites leap to a nearby pest on death.", cost: 1100 }, { name: "Pandemic", desc: "Longer infestations that jump farther.", cost: 2900 }],
-      [{ name: "Vicious Strain", desc: "Much stronger chewing.", cost: 220 }, { name: "Winged Mites", desc: "They can catch flying pests.", cost: 520 }, { name: "Burrowers", desc: "Ignore armor and find mildew.", cost: 1200 }, { name: "Hemorrhage", desc: "Brutal chew, bursting as they finish.", cost: 3100 }],
+      [{ name: "Brood Box", desc: "Two stacks of mites at once.", cost: 170 }, { name: "Infest", desc: "Three stacks, applied faster.", cost: 410 }, { name: "Plague Jump", desc: "Mites leap to a nearby pest on death.", cost: 935 }, { name: "Pandemic", desc: "Longer infestations that jump farther.", cost: 2465 }],
+      [{ name: "Vicious Strain", desc: "Much stronger chewing.", cost: 185 }, { name: "Winged Mites", desc: "They can catch flying pests.", cost: 440 }, { name: "Burrowers", desc: "Ignore armor and find mildew.", cost: 1020 }, { name: "Hemorrhage", desc: "Brutal chew, bursting as they finish.", cost: 2635 }],
     ] },
-  { id: "uv", name: "UV Lamp", short: "UV Lamp", cost: 475, role: "Reveals mildew and burns pests.", onPath: false, key: "7", color: "#7a5cff",
+  { id: "uv", name: "UV Lamp", short: "UV Lamp", cost: 380, role: "Reveals mildew and burns pests.", onPath: false, key: "7", color: "#7a5cff",
     paths: [
-      [{ name: "Floodlight", desc: "A wider detection and burn range.", cost: 280 }, { name: "Beacon", desc: "Nearby towers can see mildew too.", cost: 620 }, { name: "Watchtower", desc: "A large detect aura and a hotter lamp.", cost: 1500 }, { name: "Sunburst", desc: "Periodic pulse that scorches hidden pests.", cost: 3600 }],
-      [{ name: "UV Burn", desc: "Hotter light, especially on mildew.", cost: 300 }, { name: "Sterilizer", desc: "A lingering burn.", cost: 700 }, { name: "Scorch Beam", desc: "The beam leaps to a second pest.", cost: 1600 }, { name: "Solar Flare", desc: "A fierce, chaining flare.", cost: 4000 }],
+      [{ name: "Floodlight", desc: "A wider detection and burn range.", cost: 240 }, { name: "Beacon", desc: "Nearby towers can see mildew too.", cost: 525 }, { name: "Watchtower", desc: "A large detect aura and a hotter lamp.", cost: 1275 }, { name: "Sunburst", desc: "Periodic pulse that scorches hidden pests.", cost: 3060 }],
+      [{ name: "UV Burn", desc: "Hotter light, especially on mildew.", cost: 255 }, { name: "Sterilizer", desc: "A lingering burn.", cost: 595 }, { name: "Scorch Beam", desc: "The beam leaps to a second pest.", cost: 1360 }, { name: "Solar Flare", desc: "A fierce, chaining flare.", cost: 3400 }],
     ] },
-  { id: "duster", name: "Crop Duster", short: "Duster", cost: 800, role: "A biplane runs the field on a timer.", onPath: false, key: "8", color: "#4a7ab0",
+  { id: "duster", name: "Crop Duster", short: "Duster", cost: 640, role: "A biplane runs the field on a timer.", onPath: false, key: "8", color: "#4a7ab0",
     paths: [
-      [{ name: "Frequent Runs", desc: "The plane comes around sooner.", cost: 400 }, { name: "Crop Cover", desc: "More drops, and they find mildew.", cost: 900 }, { name: "Carpet Run", desc: "Bombs the whole dirt path.", cost: 2200 }, { name: "Air Show", desc: "Two planes, very often.", cost: 5000 }],
-      [{ name: "Payload", desc: "Heavier dust charges.", cost: 450 }, { name: "Bunker Buster", desc: "Bigger blasts that bite armor.", cost: 1000 }, { name: "Tank Buster", desc: "Devastating vs shells and bosses.", cost: 2400 }, { name: "Harvest Moon", desc: "A massive, burning payload.", cost: 5600 }],
+      [{ name: "Frequent Runs", desc: "The plane comes around sooner.", cost: 340 }, { name: "Crop Cover", desc: "More drops, and they find mildew.", cost: 765 }, { name: "Carpet Run", desc: "Bombs the whole dirt path.", cost: 1870 }, { name: "Air Show", desc: "Two planes, very often.", cost: 4250 }],
+      [{ name: "Payload", desc: "Heavier dust charges.", cost: 385 }, { name: "Bunker Buster", desc: "Bigger blasts that bite armor.", cost: 850 }, { name: "Tank Buster", desc: "Devastating vs shells and bosses.", cost: 2040 }, { name: "Harvest Moon", desc: "A massive, burning payload.", cost: 4760 }],
     ] },
 ];
+
 const TDEF: Record<TowerId, TowerDef> = Object.fromEntries(TOWERS.map((d) => [d.id, d])) as Record<TowerId, TowerDef>;
 const TIDS = TOWERS.map((d) => d.id);
 
@@ -152,7 +154,7 @@ const JOHN_INTRO = "Howdy, farmhand. Name's Cowboy John, and this here's my hemp
 const JOHN_TIPS = [
   "Towers sit beside the path, not on it — except Sticky Traps, which belong right in the dirt.",
   "Each tower has two upgrade paths. You can take one path all the way and the other up to tier 2.",
-  "Tap a placed tower to upgrade, change its target, or sell it back for a partial refund.",
+  "Tap a placed tower to upgrade, change its target, or sell it back for a full refund.",
   "Space starts the next wave. You can also hammer that Start Wave button.",
   "A half-pushed plan is still a plan. Place a couple towers before you open the gate.",
   "If it flies, a regular nest can't catch it. UV Lamps, the Crop Duster, or the right upgrades will.",
@@ -161,7 +163,7 @@ const JOHN_TIPS = [
   "Caterpillars split when they drop. Finish the little ones or they'll sneak through.",
   "The Mite Queen sheds mites as she waddles. Burn her down or you'll be swimming in 'em.",
   "Every tenth wave, the Locust Swarm King comes stompin'. He sheds flying locusts — be ready.",
-  "Sell a tower if you placed it wrong. You'll get most of your spendin' money back.",
+  "Sell a tower if you placed it wrong. You'll get every dollar you spent on it back.",
   "The plant wilts as it takes hits. Don't let that crop go brown on my watch.",
   "Two-times speed is there when you trust your line. I still watch with both eyes.",
   "Your farm autosaves between waves. Copy a save code if you want a spare in your pocket.",
@@ -648,7 +650,7 @@ function investOf(t: Tower): number {
   for (let i = 0; i < t.b; i++) n += def.paths[1][i].cost;
   return n;
 }
-function refundOf(t: Tower): number { return Math.floor(t.spent * SELL); }
+function refundOf(t: Tower): number { return Math.max(0, Math.floor(t.spent)); }
 function canUpgrade(t: Tower, path: 0 | 1): boolean {
   const cur = path === 0 ? t.a : t.b;
   const other = path === 0 ? t.b : t.a;
@@ -2847,6 +2849,7 @@ function applyStoryAfterWave(s: Sim): void {
     s.john = null;
     s.selected = null;
     s.placing = null;
+    s.pendingPlace = null;
     return;
   }
   s.joeHere = joeHereAt(next, s.revealed, s.won40, false);
@@ -2951,6 +2954,17 @@ function stepOnce(s: Sim, t: number): void {
 
 function isFreeStarter(s: Sim, kind: TowerId): boolean { return !s.freeUsed && kind === "ladybug"; }
 
+function cancelPendingPlace(s: Sim): void { s.pendingPlace = null; }
+
+function confirmPendingPlace(s: Sim): Tower | null {
+  const p = s.pendingPlace;
+  if (!p) return null;
+  const tw = placeTower(s, p.kind, p.x, p.y);
+  if (tw) s.pendingPlace = null;
+  return tw;
+}
+
+
 function placeTower(s: Sim, kind: TowerId, x: number, y: number): Tower | null {
   if (!canPlaceAt(s, kind, x, y)) return null;
   const def = TDEF[kind];
@@ -2998,7 +3012,7 @@ function freshSim(): Sim {
   const s: Sim = {
     screen: "play", mapId: MAP_ID, wave: 1, waving: false, cash: START_CASH, lives: START_LIVES, maxLives: START_LIVES,
     speed: SETTINGS.speed, towers: [], enemies: [], shots: [], planes: [], floats: [], fx: [], spawnQ: [], waveT: 0,
-    selected: null, placing: null, hover: null, john: null, intro: true, won40: false, time: 0, uid: 1,
+    selected: null, placing: null, pendingPlace: null, hover: null, john: null, intro: true, won40: false, time: 0, uid: 1,
     seen: [], dirty: false, over: false, pendingEnd: 0, shake: 0,
     revealed: false, joeHere: true, johnHere: true, freeUsed: false, cut: null,
   };
@@ -3149,13 +3163,16 @@ function drawFrame(c: CanvasRenderingContext2D, s: Sim, cssW: number, cssH: numb
     c.restore();
     if (s.selected === tw.id) drawRange(c, tw.x, tw.y, statsFor(tw.kind, tw.a, tw.b).range, true);
   }
-  if (s.placing && s.hover) {
-    const st = statsFor(s.placing, 0, 0);
-    const ok = canPlaceAt(s, s.placing, s.hover.x, s.hover.y) && (isFreeStarter(s, s.placing) || s.cash >= TDEF[s.placing].cost);
-    drawRange(c, s.hover.x, s.hover.y, st.range, ok);
-    c.globalAlpha = ok ? 0.85 : 0.45;
-    c.save(); c.translate(s.hover.x, s.hover.y);
-    drawTowerSprite(c, s.placing, 0, 0, s.time, 0, 0);
+  const ghostKind = s.pendingPlace ? s.pendingPlace.kind : (s.placing && s.hover ? s.placing : null);
+  const ghostPt = s.pendingPlace ? { x: s.pendingPlace.x, y: s.pendingPlace.y } : (s.placing && s.hover ? s.hover : null);
+  if (ghostKind && ghostPt) {
+    const st = statsFor(ghostKind, 0, 0);
+    const ok = canPlaceAt(s, ghostKind, ghostPt.x, ghostPt.y) && (isFreeStarter(s, ghostKind) || s.cash >= TDEF[ghostKind].cost);
+    drawRange(c, ghostPt.x, ghostPt.y, st.range, ok);
+    const pulse = s.pendingPlace && !s.pendingPlace.drag ? 0.72 + 0.16 * Math.sin(s.time * 6) : (ok ? 0.85 : 0.45);
+    c.globalAlpha = pulse;
+    c.save(); c.translate(ghostPt.x, ghostPt.y);
+    drawTowerSprite(c, ghostKind, 0, 0, s.time, 0, 0);
     c.restore();
     c.globalAlpha = 1;
   }
@@ -3251,14 +3268,14 @@ function worldFromEvent(el: HTMLCanvasElement, ev: { clientX: number; clientY: n
 /* ---------- React app ---------- */
 type Hud = {
   screen: Screen; cash: number; lives: number; maxLives: number; wave: number; waving: boolean; speed: number;
-  placing: TowerId | null; selected: number | null; john: JohnMsg | null; intro: boolean; won40: boolean;
+  placing: TowerId | null; pendingPlace: PendingPlace | null; selected: number | null; john: JohnMsg | null; intro: boolean; won40: boolean;
   over: boolean; toast: string; startBanner: string; exitAsk: boolean; exitScreen: boolean; saveOpen: boolean; confirmNew: boolean; confirmRestart: boolean; hasSave: boolean;
   codeMsg: string; showingHelp: boolean; freeUsed: boolean; cut: Cutscene | null; hd: boolean;
 };
 
 const INIT_HUD: Hud = {
   screen: "title", cash: 0, lives: 0, maxLives: START_LIVES, wave: 1, waving: false, speed: 1,
-  placing: null, selected: null, john: null, intro: false, won40: false, over: false, toast: "", startBanner: "",
+  placing: null, pendingPlace: null, selected: null, john: null, intro: false, won40: false, over: false, toast: "", startBanner: "",
   exitAsk: false, exitScreen: false, saveOpen: false, confirmNew: false, confirmRestart: false, hasSave: false, codeMsg: "", showingHelp: false, freeUsed: false, cut: null, hd: SETTINGS.hd,
 };
 
@@ -3268,7 +3285,7 @@ function snapHud(s: Sim | null, extra: Partial<Hud> = {}): Hud {
   return {
     ...base,
     screen: extra.showingHelp ? "help" : s.screen, cash: s.cash, lives: s.lives, maxLives: s.maxLives, wave: s.wave, waving: s.waving,
-    speed: s.speed, placing: s.placing, selected: s.selected, john: s.john, intro: s.intro, won40: s.won40, over: s.over,
+    speed: s.speed, placing: s.placing, pendingPlace: s.pendingPlace, selected: s.selected, john: s.john, intro: s.intro, won40: s.won40, over: s.over,
     showingHelp: extra.showingHelp === true, freeUsed: s.freeUsed, cut: s.cut,
   };
 }
@@ -3394,9 +3411,11 @@ export default function CowboyJohnsCropDefense() {
           if (ctx) view.current = drawFrame(ctx, s, w, h, dpr);
         }
         const h = hudRef.current;
-        const need = h.cash !== s.cash || h.lives !== s.lives || h.wave !== s.wave || h.waving !== s.waving || h.screen !== s.screen || h.selected !== s.selected || h.placing !== s.placing || (h.john?.text !== s.john?.text) || h.speed !== s.speed || h.freeUsed !== s.freeUsed || (h.cut?.phase !== s.cut?.phase);
+        const hp = h.pendingPlace, sp = s.pendingPlace;
+        const pendingChanged = (!hp && !!sp) || (!!hp && !sp) || (!!hp && !!sp && (hp.kind !== sp.kind || hp.drag !== sp.drag || hp.x !== sp.x || hp.y !== sp.y));
+        const need = h.cash !== s.cash || h.lives !== s.lives || h.wave !== s.wave || h.waving !== s.waving || h.screen !== s.screen || h.selected !== s.selected || h.placing !== s.placing || pendingChanged || (h.john?.text !== s.john?.text) || h.speed !== s.speed || h.freeUsed !== s.freeUsed || (h.cut?.phase !== s.cut?.phase);
         if (need) {
-          const urgent = h.screen !== s.screen || h.selected !== s.selected || h.placing !== s.placing || h.waving !== s.waving || (h.john?.text !== s.john?.text);
+          const urgent = h.screen !== s.screen || h.selected !== s.selected || h.placing !== s.placing || pendingChanged || h.waving !== s.waving || (h.john?.text !== s.john?.text);
           const nowB = now;
           if (urgent || nowB - ((window as unknown as { __cjcdBump?: number }).__cjcdBump ?? 0) > 120) {
             (window as unknown as { __cjcdBump?: number }).__cjcdBump = nowB;
@@ -3521,10 +3540,39 @@ export default function CowboyJohnsCropDefense() {
     const p = worldFromEvent(el, ev, view.current);
     if (kind === "move" || kind === "down") s.hover = p;
     if (s.cut) { if (kind === "up") { skipCutscene(s); bump(); } return; }
+    if (s.pendingPlace) {
+      if (kind === "down") {
+        if (dist(p.x, p.y, s.pendingPlace.x, s.pendingPlace.y) <= 40) s.pendingPlace.drag = true;
+        bump();
+        return;
+      }
+      if (kind === "move" && s.pendingPlace.drag) {
+        s.pendingPlace.x = p.x;
+        s.pendingPlace.y = p.y;
+        bump();
+        return;
+      }
+      if (kind === "up" && s.pendingPlace.drag) {
+        if (canPlaceAt(s, s.pendingPlace.kind, p.x, p.y)) {
+          s.pendingPlace.x = p.x; s.pendingPlace.y = p.y;
+          s.pendingPlace.okX = p.x; s.pendingPlace.okY = p.y;
+        } else {
+          s.pendingPlace.x = s.pendingPlace.okX;
+          s.pendingPlace.y = s.pendingPlace.okY;
+          toast("Can't plant that there.");
+        }
+        s.pendingPlace.drag = false;
+        bump();
+        return;
+      }
+      return;
+    }
     if (kind !== "up") { if (kind === "move" && s.placing) bump(); return; }
     if (s.placing) {
-      const tw = placeTower(s, s.placing, p.x, p.y);
-      if (!tw) toast(s.cash < TDEF[s.placing].cost ? "Not enough cash." : "Can't plant that there.");
+      if (!canPlaceAt(s, s.placing, p.x, p.y)) { toast("Can't plant that there."); bump(); return; }
+      if (!isFreeStarter(s, s.placing) && s.cash < TDEF[s.placing].cost) { toast("Not enough cash."); bump(); return; }
+      s.pendingPlace = { kind: s.placing, x: p.x, y: p.y, okX: p.x, okY: p.y, drag: false };
+      s.placing = null;
       bump();
       return;
     }
@@ -3565,6 +3613,7 @@ export default function CowboyJohnsCropDefense() {
         e.preventDefault();
         if (!s || h.screen === "title" || h.screen === "help") { bump({ exitAsk: true }); return; }
         if (s.cut) { skipCutscene(s); bump(); return; }
+        if (s.pendingPlace) { cancelPendingPlace(s); bump(); return; }
         if (s.placing) { s.placing = null; bump(); return; }
         if (s.selected !== null) { s.selected = null; bump(); return; }
         if (s.john?.modal) { s.john = null; s.intro = false; bump(); return; }
@@ -3610,6 +3659,7 @@ export default function CowboyJohnsCropDefense() {
       const idx = "12345678".indexOf(num);
       if (idx >= 0) {
         const id = TIDS[idx];
+        if (s.pendingPlace) cancelPendingPlace(s);
         s.placing = s.placing === id ? null : id;
         s.selected = null;
         bump();
@@ -3625,6 +3675,8 @@ export default function CowboyJohnsCropDefense() {
       cash: (n: number) => void;
       lives: (n: number) => void;
       place: (id: string, x: number, y: number) => string;
+      confirmPending: () => string;
+      cancelPending: () => string;
       startWave: () => boolean;
       speed: (n: number) => void;
       hd: (on: boolean) => void;
@@ -3645,7 +3697,7 @@ export default function CowboyJohnsCropDefense() {
       get: () => {
         const s = sim.current;
         if (!s) return { screen: hudRef.current.screen, hasSave: !!loadSaved() };
-        return { screen: s.screen, cash: s.cash, lives: s.lives, wave: s.wave, waving: s.waving, towers: s.towers.length, enemies: s.enemies.length, speed: s.speed, selected: s.selected, placing: s.placing, won40: s.won40, intro: !!s.john?.modal, freeUsed: s.freeUsed, cut: s.cut ? s.cut.phase : null, revealed: s.revealed, who: s.john?.who ?? null, beat: s.john?.beat ?? null };
+        return { screen: s.screen, cash: s.cash, lives: s.lives, wave: s.wave, waving: s.waving, towers: s.towers.length, enemies: s.enemies.length, speed: s.speed, selected: s.selected, placing: s.placing, pending: s.pendingPlace ? { kind: s.pendingPlace.kind, x: s.pendingPlace.x, y: s.pendingPlace.y, drag: s.pendingPlace.drag } : null, spent: s.towers.map((t) => t.spent), won40: s.won40, intro: !!s.john?.modal, freeUsed: s.freeUsed, cut: s.cut ? s.cut.phase : null, revealed: s.revealed, who: s.john?.who ?? null, beat: s.john?.beat ?? null };
       },
       cash: (n: number) => { const s = sim.current; if (s) { s.cash = n; bump(); } },
       lives: (n: number) => { const s = sim.current; if (s) { s.lives = n; bump(); } },
@@ -3653,9 +3705,19 @@ export default function CowboyJohnsCropDefense() {
         const s = sim.current;
         if (!s) return "no sim";
         if (TIDS.indexOf(id as TowerId) < 0) return "bad id";
+        if (s.pendingPlace) cancelPendingPlace(s);
         const tw = placeTower(s, id as TowerId, x, y);
         bump();
         return tw ? "ok" : "fail";
+      },
+      confirmPending: () => {
+        const s = sim.current; if (!s) return "no sim";
+        const tw = confirmPendingPlace(s); bump();
+        return tw ? "ok" : "fail";
+      },
+      cancelPending: () => {
+        const s = sim.current; if (!s) return "no sim";
+        cancelPendingPlace(s); bump(); return "ok";
       },
       startWave: () => { const s = sim.current; if (!s) return false; const ok = startWave(s); bump(); return ok; },
       speed: (n: number) => { const s = sim.current; if (s) { s.speed = setSpeedPref(n); bump(); } },
@@ -3686,7 +3748,7 @@ export default function CowboyJohnsCropDefense() {
       playBetrayal: (phase?: number) => {
         const s = sim.current; if (!s) return;
         s.revealed = true; s.wave = 40; s.waving = false; s.intro = false; s.enemies = []; s.spawnQ = [];
-        s.joeHere = true; s.johnHere = true; s.selected = null; s.placing = null;
+        s.joeHere = true; s.johnHere = true; s.selected = null; s.placing = null; s.pendingPlace = null;
         const ph = (phase === 1 || phase === 2) ? phase : 0;
         s.cut = { kind: "betrayal", t: ph === 0 ? 1.2 : 0.6, phase: ph };
         if (ph === 1) say(s, JOE_REVEAL, true, 99, "joe", "reveal");
@@ -3739,10 +3801,11 @@ export default function CowboyJohnsCropDefense() {
   const shopBtn = (d: TowerDef): JSX.Element => {
     const isFree = !hud.freeUsed && d.id === "ladybug";
     const afford = isFree || hud.cash >= d.cost;
-    const on = hud.placing === d.id;
+    const on = hud.placing === d.id || hud.pendingPlace?.kind === d.id;
     return (
       <button type="button" key={d.id} data-testid={`shop-${d.id}`} onClick={() => {
         const s = sim.current; if (!s || s.screen !== "play") return;
+        if (s.pendingPlace) cancelPendingPlace(s);
         s.placing = s.placing === d.id ? null : d.id; s.selected = null; bump();
       }} style={{
         width: land ? "100%" : 76, minWidth: 70, flex: land ? "0 0 auto" : "0 0 76px",
@@ -3970,9 +4033,9 @@ export default function CowboyJohnsCropDefense() {
       </div>
       <p>You're hired help on Cowboy John's hemp farm. Pests march the dirt path toward his plant. Place towers beside the path and don't let the crop wilt. Lives are the plant's health — it droops as it takes hits. John stops by with tips, and other hands on the farm have a routine of their own. There's no forced tutorial.</p>
       <h3 style={{ color: t.text.warning, fontSize: 16 }}>Placing</h3>
-      <p>Tap a tower in the shop, then tap a valid spot (green range circle). Red means you can't plant there. Sticky Traps must sit <b>on</b> the path; everything else sits off it. Tap a placed tower to upgrade or sell.</p>
+      <p>Pick a tower in the shop, then drag it onto the field. A ghost and range circle follow your pointer or finger — green is a valid spot, red is not. Release to set it down, then Confirm ✓ to plant or Cancel ✗ to put it back. You can drag a pending tower again to nudge it before you confirm. Sticky Traps must sit <b>on</b> the path; everything else sits off it. Tap a placed tower to upgrade or sell.</p>
       <h3 style={{ color: t.text.warning, fontSize: 16 }}>Upgrades</h3>
-      <p>Each tower has two paths of four tiers. You can take one path all the way to 4 and the other up to 2 (4/2 or 2/4). Selling refunds 70% of what you spent.</p>
+      <p>Each tower has two paths of four tiers. You can take one path all the way to 4 and the other up to 2 (4/2 or 2/4). Selling refunds 100% of what you spent, including every upgrade.</p>
       <h3 style={{ color: t.text.warning, fontSize: 16 }}>Pests</h3>
       <ul style={{ paddingLeft: 18, margin: 0 }}>
         <li>Spider mites — basic.</li>
@@ -4061,6 +4124,40 @@ export default function CowboyJohnsCropDefense() {
                 onPointerCancel={() => { const s = sim.current; if (s) s.hover = null; }}
                 onContextMenu={(e) => e.preventDefault()}
               />
+              {hud.pendingPlace && !hud.pendingPlace.drag && hud.screen === "play" && !hud.cut && (() => {
+                const v = view.current;
+                const cssW = v.ox * 2 + WW * v.scale;
+                const cssH = v.oy * 2 + WH * v.scale;
+                let left = v.ox + hud.pendingPlace.x * v.scale;
+                let top = v.oy + hud.pendingPlace.y * v.scale + Math.max(28, 36 * v.scale);
+                if (top > cssH - 60) top = v.oy + hud.pendingPlace.y * v.scale - 64;
+                left = Math.max(52, Math.min(cssW - 52, left));
+                top = Math.max(8, Math.min(cssH - 52, top));
+                const act = (ok: boolean): void => {
+                  const simState = sim.current; if (!simState) return;
+                  if (ok) {
+                    const tw = confirmPendingPlace(simState);
+                    if (!tw) toast("Can't plant that there.");
+                  } else cancelPendingPlace(simState);
+                  bump();
+                };
+                const bstyle = (tone: "ok" | "no"): CSSProperties => ({
+                  width: 44, height: 44, borderRadius: 22, cursor: "pointer", fontSize: 22, fontWeight: 800,
+                  border: `2px solid ${tone === "ok" ? t.border.focus : t.border.default}`,
+                  background: tone === "ok" ? t.fill.successSubtle : t.fill.dangerSubtle,
+                  color: tone === "ok" ? t.text.success : t.text.danger,
+                  fontFamily: "inherit", lineHeight: 1, WebkitTapHighlightColor: "transparent",
+                });
+                return (
+                  <div data-testid="place-actions" onPointerDown={(e) => e.stopPropagation()} style={{
+                    position: "absolute", left, top, transform: "translate(-50%, 0)", zIndex: 8,
+                    display: "flex", gap: 10, pointerEvents: "auto",
+                  }}>
+                    <button type="button" data-testid="place-confirm" title="Confirm" aria-label="Confirm" onClick={() => act(true)} style={bstyle("ok")}>✓</button>
+                    <button type="button" data-testid="place-cancel" title="Cancel" aria-label="Cancel" onClick={() => act(false)} style={bstyle("no")}>✗</button>
+                  </div>
+                );
+              })()}
               {hud.cut && (
                 <div data-testid={hud.cut.phase === 0 ? "betrayal-cut" : (hud.john?.beat === "reveal" ? "joe-reveal" : "john-react")}
                   onClick={() => { const s = sim.current; if (s) { skipCutscene(s); bump(); } }}
