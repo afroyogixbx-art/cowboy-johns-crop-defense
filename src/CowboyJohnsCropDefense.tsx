@@ -3177,14 +3177,14 @@ function worldFromEvent(el: HTMLCanvasElement, ev: { clientX: number; clientY: n
 type Hud = {
   screen: Screen; cash: number; lives: number; maxLives: number; wave: number; waving: boolean; speed: number;
   placing: TowerId | null; selected: number | null; john: JohnMsg | null; intro: boolean; won40: boolean;
-  over: boolean; toast: string; exitAsk: boolean; exitScreen: boolean; saveOpen: boolean; confirmNew: boolean; hasSave: boolean;
+  over: boolean; toast: string; exitAsk: boolean; exitScreen: boolean; saveOpen: boolean; confirmNew: boolean; confirmRestart: boolean; hasSave: boolean;
   codeMsg: string; showingHelp: boolean; freeUsed: boolean; cut: Cutscene | null; hd: boolean;
 };
 
 const INIT_HUD: Hud = {
   screen: "title", cash: 0, lives: 0, maxLives: START_LIVES, wave: 1, waving: false, speed: 1,
   placing: null, selected: null, john: null, intro: false, won40: false, over: false, toast: "",
-  exitAsk: false, exitScreen: false, saveOpen: false, confirmNew: false, hasSave: false, codeMsg: "", showingHelp: false, freeUsed: false, cut: null, hd: SETTINGS.hd,
+  exitAsk: false, exitScreen: false, saveOpen: false, confirmNew: false, confirmRestart: false, hasSave: false, codeMsg: "", showingHelp: false, freeUsed: false, cut: null, hd: SETTINGS.hd,
 };
 
 function snapHud(s: Sim | null, extra: Partial<Hud> = {}): Hud {
@@ -3252,7 +3252,7 @@ export default function CowboyJohnsCropDefense() {
   const hudRef = useRef(hud);
   hudRef.current = hud;
   const bump = useCallback((extra: Partial<Hud> = {}): void => {
-    setHud((h) => snapHud(sim.current, { ...h, toast: extra.toast ?? h.toast, exitAsk: extra.exitAsk ?? h.exitAsk, exitScreen: extra.exitScreen ?? h.exitScreen, saveOpen: extra.saveOpen ?? h.saveOpen, confirmNew: extra.confirmNew ?? h.confirmNew, codeMsg: extra.codeMsg ?? h.codeMsg, showingHelp: extra.showingHelp ?? h.showingHelp, hd: extra.hd ?? h.hd, hasSave: !!loadSaved(), ...extra }));
+    setHud((h) => snapHud(sim.current, { ...h, toast: extra.toast ?? h.toast, exitAsk: extra.exitAsk ?? h.exitAsk, exitScreen: extra.exitScreen ?? h.exitScreen, saveOpen: extra.saveOpen ?? h.saveOpen, confirmNew: extra.confirmNew ?? h.confirmNew, confirmRestart: extra.confirmRestart ?? h.confirmRestart, codeMsg: extra.codeMsg ?? h.codeMsg, showingHelp: extra.showingHelp ?? h.showingHelp, hd: extra.hd ?? h.hd, hasSave: !!loadSaved(), ...extra }));
   }, []);
   const toast = useCallback((t: string): void => { bump({ toast: t }); window.setTimeout(() => { setHud((h) => h.toast === t ? { ...h, toast: "" } : h); }, 2400); }, [bump]);
 
@@ -3365,7 +3365,32 @@ export default function CowboyJohnsCropDefense() {
   const startNew = useCallback((): void => {
     const s = freshSim();
     sim.current = s;
-    bump({ confirmNew: false, exitAsk: false, saveOpen: false });
+    bump({ confirmNew: false, confirmRestart: false, exitAsk: false, saveOpen: false });
+  }, [bump]);
+
+  const restartFromPlay = useRef(false);
+  const askRestart = useCallback((): void => {
+    const s = sim.current;
+    const h = hudRef.current;
+    if (!s || h.screen === "title" || h.showingHelp || h.exitScreen || h.saveOpen || h.confirmRestart) return;
+    restartFromPlay.current = s.screen === "play";
+    if (s.screen === "play") s.screen = "paused";
+    bump({ confirmRestart: true });
+  }, [bump]);
+  const cancelRestart = useCallback((): void => {
+    const s = sim.current;
+    if (s && restartFromPlay.current && s.screen === "paused") s.screen = "play";
+    restartFromPlay.current = false;
+    bump({ confirmRestart: false });
+  }, [bump]);
+  const doRestart = useCallback((): void => {
+    restartFromPlay.current = false;
+    const s = freshSim();
+    s.intro = false;
+    s.john = null;
+    persist(s);
+    sim.current = s;
+    bump({ confirmRestart: false, confirmNew: false, exitAsk: false, saveOpen: false, showingHelp: false });
   }, [bump]);
 
   const resume = useCallback((): void => {
@@ -3379,7 +3404,7 @@ export default function CowboyJohnsCropDefense() {
   const goTitle = useCallback((): void => {
     flush();
     sim.current = null;
-    bump({ screen: "title", exitAsk: false, exitScreen: false, saveOpen: false, confirmNew: false });
+    bump({ screen: "title", exitAsk: false, exitScreen: false, saveOpen: false, confirmNew: false, confirmRestart: false });
     setHud((h) => ({ ...INIT_HUD, hasSave: !!loadSaved(), hd: SETTINGS.hd, toast: h.toast }));
   }, [flush, bump]);
 
@@ -3441,7 +3466,17 @@ export default function CowboyJohnsCropDefense() {
         return;
       }
       if (h.saveOpen && e.key === "Escape") { bump({ saveOpen: false }); return; }
+      if (h.confirmRestart) {
+        if (e.key === "Escape") { cancelRestart(); e.preventDefault(); }
+        return;
+      }
       const s = sim.current;
+      if ((e.key === "r" || e.key === "R") && !h.saveOpen && !h.exitAsk && !h.exitScreen && !h.showingHelp && h.screen !== "title") {
+        const tgt = e.target;
+        if (tgt instanceof HTMLElement && (tgt.tagName === "INPUT" || tgt.tagName === "TEXTAREA" || tgt.isContentEditable)) return;
+        if (s) { askRestart(); e.preventDefault(); }
+        return;
+      }
       if (e.key === "Escape") {
         e.preventDefault();
         if (!s || h.screen === "title" || h.screen === "help") { bump({ exitAsk: true }); return; }
@@ -3498,7 +3533,7 @@ export default function CowboyJohnsCropDefense() {
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [bump, backToMenu]);
+  }, [bump, backToMenu, askRestart, cancelRestart]);
 
   useEffect(() => {
     type Api = {
@@ -3650,7 +3685,8 @@ export default function CowboyJohnsCropDefense() {
       <div style={{ fontWeight: 700, fontSize: 14, color: t.text.secondary, flex: 1 }} data-testid="wave">Wave {hud.wave}{hud.wave > MAX_WAVE ? " · Freeplay" : ""}{hud.waving ? " · INCOMING" : ""}</div>
       {btn(hud.speed === 1 ? "1×" : hud.speed === 2 ? "2×" : "4×", () => { const s = sim.current; if (s) { s.speed = setSpeedPref(cycleSpeed(s.speed)); if (s.screen !== "defeat") persist(s); bump(); } }, { test: "speed", small: true })}
       {btn(hud.waving ? "Wave running" : "Start Wave", () => { const s = sim.current; if (s && s.screen === "play") { startWave(s); bump(); } }, { tone: "pri", test: "start-wave", disabled: hud.waving || hud.screen !== "play" || !!hud.cut, small: true })}
-      {btn("Menu", () => { const s = sim.current; if (s && (s.screen === "play" || s.screen === "paused")) { s.screen = s.screen === "paused" ? "play" : "paused"; bump(); } }, { test: "menu", small: true })}
+      {btn("Menu", () => { const s = sim.current; if (hud.confirmRestart) return; if (s && (s.screen === "play" || s.screen === "paused")) { s.screen = s.screen === "paused" ? "play" : "paused"; bump(); } }, { test: "menu", small: true })}
+      {btn("Restart", () => askRestart(), { tone: "danger", small: true, test: "restart" })}
     </div>
   ) : null;
 
@@ -3765,6 +3801,16 @@ export default function CowboyJohnsCropDefense() {
         </Modal>
       );
     }
+    if (hud.confirmRestart) {
+      return (
+        <Modal title="Restart from wave 1?" test="restart-confirm">
+          <div style={{ display: "flex", gap: 8 }}>
+            {btn("Restart", doRestart, { tone: "danger", grow: true, test: "confirm-restart" })}
+            {btn("Cancel", cancelRestart, { grow: true, test: "cancel-restart" })}
+          </div>
+        </Modal>
+      );
+    }
     if (hud.john?.modal && playHud && !hud.cut && hud.screen !== "victory" && hud.screen !== "defeat") {
       return (
         <Modal title={hud.john?.who === "joe" ? (hud.john?.beat === "reveal" ? "Joe" : "Joe") : "Cowboy John"} test={hud.john?.beat === "reveal" ? "joe-reveal" : hud.john?.beat === "joeHello" ? "joe-hello" : "john-intro"}>
@@ -3799,6 +3845,7 @@ export default function CowboyJohnsCropDefense() {
               display: "block", textAlign: "center", fontSize: 13, fontWeight: 700,
               color: t.text.secondary, textDecoration: "underline", cursor: "pointer", padding: 6,
             }}>Play classic version</a>
+            {btn("Restart", () => askRestart(), { tone: "danger", grow: true, test: "restart-pause" })}
             {btn("Title screen", () => goTitle(), { grow: true, test: "to-title" })}
             {btn("Quit farm", () => bump({ exitAsk: true }), { tone: "danger", grow: true, test: "quit-farm" })}
           </div>
@@ -3858,7 +3905,7 @@ export default function CowboyJohnsCropDefense() {
       <h3 style={{ color: t.text.warning, fontSize: 16 }}>Saving</h3>
       <p>The farm autosaves between waves on this device. Copy a save code from the menu if you want a backup or to move to another phone.</p>
       <h3 style={{ color: t.text.warning, fontSize: 16 }}>Keys</h3>
-      <p>1–8 select towers, Space starts a wave, F cycles 1× / 2× / 4×, Q / E upgrade path A / B, T cycles targeting, X or Shift+S sells, Esc pauses or backs out. The phone back button asks before leaving.</p>
+      <p>1–8 select towers, Space starts a wave, F cycles 1× / 2× / 4×, Q / E upgrade path A / B, T cycles targeting, X or Shift+S sells, R asks to restart from wave 1, Esc pauses or backs out. The phone back button asks before leaving.</p>
 
     </div>
   );

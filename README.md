@@ -36,7 +36,7 @@ Spider mites, fast aphids, armored beetles, split caterpillars (they drop inchwo
 
 ## Keys
 
-1–8 select towers, Space starts a wave, F toggles 2× speed, Q / E upgrade path A / B, T cycles targeting, X (or Shift+S) sells, Esc pauses or backs out. The phone back button asks before leaving.
+1–8 select towers, Space starts a wave, F toggles 2× speed, Q / E upgrade path A / B, T cycles targeting, X (or Shift+S) sells, R asks to restart from wave 1, Esc pauses or backs out. The phone back button asks before leaving.
 
 ## Develop
 
