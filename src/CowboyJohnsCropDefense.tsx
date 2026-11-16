@@ -3177,13 +3177,13 @@ function worldFromEvent(el: HTMLCanvasElement, ev: { clientX: number; clientY: n
 type Hud = {
   screen: Screen; cash: number; lives: number; maxLives: number; wave: number; waving: boolean; speed: number;
   placing: TowerId | null; selected: number | null; john: JohnMsg | null; intro: boolean; won40: boolean;
-  over: boolean; toast: string; exitAsk: boolean; exitScreen: boolean; saveOpen: boolean; confirmNew: boolean; confirmRestart: boolean; hasSave: boolean;
+  over: boolean; toast: string; startBanner: string; exitAsk: boolean; exitScreen: boolean; saveOpen: boolean; confirmNew: boolean; confirmRestart: boolean; hasSave: boolean;
   codeMsg: string; showingHelp: boolean; freeUsed: boolean; cut: Cutscene | null; hd: boolean;
 };
 
 const INIT_HUD: Hud = {
   screen: "title", cash: 0, lives: 0, maxLives: START_LIVES, wave: 1, waving: false, speed: 1,
-  placing: null, selected: null, john: null, intro: false, won40: false, over: false, toast: "",
+  placing: null, selected: null, john: null, intro: false, won40: false, over: false, toast: "", startBanner: "",
   exitAsk: false, exitScreen: false, saveOpen: false, confirmNew: false, confirmRestart: false, hasSave: false, codeMsg: "", showingHelp: false, freeUsed: false, cut: null, hd: SETTINGS.hd,
 };
 
@@ -3252,9 +3252,16 @@ export default function CowboyJohnsCropDefense() {
   const hudRef = useRef(hud);
   hudRef.current = hud;
   const bump = useCallback((extra: Partial<Hud> = {}): void => {
-    setHud((h) => snapHud(sim.current, { ...h, toast: extra.toast ?? h.toast, exitAsk: extra.exitAsk ?? h.exitAsk, exitScreen: extra.exitScreen ?? h.exitScreen, saveOpen: extra.saveOpen ?? h.saveOpen, confirmNew: extra.confirmNew ?? h.confirmNew, confirmRestart: extra.confirmRestart ?? h.confirmRestart, codeMsg: extra.codeMsg ?? h.codeMsg, showingHelp: extra.showingHelp ?? h.showingHelp, hd: extra.hd ?? h.hd, hasSave: !!loadSaved(), ...extra }));
+    setHud((h) => snapHud(sim.current, { ...h, toast: extra.toast ?? h.toast, startBanner: extra.startBanner ?? h.startBanner, exitAsk: extra.exitAsk ?? h.exitAsk, exitScreen: extra.exitScreen ?? h.exitScreen, saveOpen: extra.saveOpen ?? h.saveOpen, confirmNew: extra.confirmNew ?? h.confirmNew, confirmRestart: extra.confirmRestart ?? h.confirmRestart, codeMsg: extra.codeMsg ?? h.codeMsg, showingHelp: extra.showingHelp ?? h.showingHelp, hd: extra.hd ?? h.hd, hasSave: !!loadSaved(), ...extra }));
   }, []);
   const toast = useCallback((t: string): void => { bump({ toast: t }); window.setTimeout(() => { setHud((h) => h.toast === t ? { ...h, toast: "" } : h); }, 2400); }, [bump]);
+  const announceStart = useCallback((kind: "new" | "restart"): void => {
+    const startBanner = kind === "restart" ? "Restarted · Wave 1" : "New game · Wave 1";
+    const msg = kind === "restart" ? "Restarted from wave 1." : "New game started.";
+    bump({ startBanner, toast: msg });
+    window.setTimeout(() => { setHud((h) => h.startBanner === startBanner ? { ...h, startBanner: "" } : h); }, 2500);
+    window.setTimeout(() => { setHud((h) => h.toast === msg ? { ...h, toast: "" } : h); }, 2400);
+  }, [bump]);
 
   const flush = useCallback((): void => { const s = sim.current; if (s && s.screen !== "defeat" && s.screen !== "title") persist(s); }, []);
 
@@ -3366,7 +3373,8 @@ export default function CowboyJohnsCropDefense() {
     const s = freshSim();
     sim.current = s;
     bump({ confirmNew: false, confirmRestart: false, exitAsk: false, saveOpen: false });
-  }, [bump]);
+    announceStart("new");
+  }, [bump, announceStart]);
 
   const restartFromPlay = useRef(false);
   const askRestart = useCallback((): void => {
@@ -3391,7 +3399,8 @@ export default function CowboyJohnsCropDefense() {
     persist(s);
     sim.current = s;
     bump({ confirmRestart: false, confirmNew: false, exitAsk: false, saveOpen: false, showingHelp: false });
-  }, [bump]);
+    announceStart("restart");
+  }, [bump, announceStart]);
 
   const resume = useCallback((): void => {
     const d = loadSaved();
@@ -3405,7 +3414,7 @@ export default function CowboyJohnsCropDefense() {
     flush();
     sim.current = null;
     bump({ screen: "title", exitAsk: false, exitScreen: false, saveOpen: false, confirmNew: false, confirmRestart: false });
-    setHud((h) => ({ ...INIT_HUD, hasSave: !!loadSaved(), hd: SETTINGS.hd, toast: h.toast }));
+    setHud((h) => ({ ...INIT_HUD, hasSave: !!loadSaved(), hd: SETTINGS.hd }));
   }, [flush, bump]);
 
   const backToMenu = useCallback((): void => {
@@ -3413,7 +3422,7 @@ export default function CowboyJohnsCropDefense() {
     try { trapBack(); } catch { /* ignore */ }
     flush();
     sim.current = null;
-    setHud((h) => ({ ...INIT_HUD, hasSave: !!loadSaved(), hd: SETTINGS.hd, toast: h.toast, exitScreen: false, exitAsk: false }));
+    setHud((h) => ({ ...INIT_HUD, hasSave: !!loadSaved(), hd: SETTINGS.hd, exitScreen: false, exitAsk: false }));
   }, [flush]);
 
   const leaveNow = useCallback((): void => {
@@ -3623,22 +3632,23 @@ export default function CowboyJohnsCropDefense() {
   const t = theme;
   const sel = sim.current && hud.selected !== null ? sim.current.towers.find((tw) => tw.id === hud.selected) : undefined;
 
-  const btn = (label: string, onClick: () => void, opts: { tone?: "pri" | "danger" | "ghost" | "ok"; grow?: boolean; test?: string; disabled?: boolean; small?: boolean } = {}): JSX.Element => (
+  const btn = (label: string, onClick: () => void, opts: { tone?: "pri" | "danger" | "ghost" | "ok"; grow?: boolean; test?: string; disabled?: boolean; small?: boolean; large?: boolean } = {}): JSX.Element => (
     <button
       type="button"
       data-testid={opts.test}
       disabled={opts.disabled}
       onClick={onClick}
       style={{
-        flex: opts.grow ? "1 1 120px" : undefined,
-        minHeight: opts.small ? 36 : 48,
-        padding: opts.small ? "6px 10px" : "10px 14px",
+        flex: opts.grow ? (opts.large ? "1.3 1 140px" : "1 1 120px") : undefined,
+        minHeight: opts.large ? 60 : opts.small ? 36 : 48,
+        padding: opts.large ? "14px 18px" : opts.small ? "6px 10px" : "10px 14px",
         borderRadius: 12,
         border: `1px solid ${opts.tone === "pri" ? t.border.focus : t.border.default}`,
         background: opts.disabled ? t.fill.secondary : opts.tone === "pri" ? t.fill.primary : opts.tone === "danger" ? t.fill.dangerSubtle : opts.tone === "ok" ? t.fill.successSubtle : t.fill.secondary,
         color: opts.disabled ? t.text.tertiary : opts.tone === "pri" ? t.text.onPrimary : opts.tone === "danger" ? t.text.danger : opts.tone === "ok" ? t.text.success : t.text.primary,
-        fontFamily: "inherit", fontSize: opts.small ? 13 : 15, fontWeight: 700, cursor: opts.disabled ? "default" : "pointer",
+        fontFamily: "inherit", fontSize: opts.large ? 18 : opts.small ? 13 : 15, fontWeight: opts.large ? 800 : 700, cursor: opts.disabled ? "default" : "pointer",
         opacity: opts.disabled ? 0.55 : 1, WebkitTapHighlightColor: "transparent",
+        boxShadow: opts.large && opts.tone === "pri" && !opts.disabled ? "0 2px 0 rgba(0,0,0,0.35), 0 0 0 2px rgba(232,192,80,0.35)" : undefined,
       }}
     >{label}</button>
   );
@@ -3921,8 +3931,10 @@ export default function CowboyJohnsCropDefense() {
         <div style={{ fontFamily: "Georgia, serif", fontSize: "clamp(22px, 7vw, 40px)", fontWeight: 800, textAlign: "center", color: t.text.primary, marginBottom: 8, textShadow: "0 2px 8px #000" }}>Crop Defense</div>
         <div style={{ fontSize: 14, color: t.text.secondary, marginBottom: 18, textAlign: "center" }}>Hold South Field. Don't let the crop wilt.</div>
         <div style={{ display: "flex", flexDirection: "column", gap: 8, width: "min(360px, 100%)" }}>
-          {hud.hasSave && btn("Continue", resume, { tone: "pri", grow: true, test: "continue" })}
-          {btn("New Game", () => { if (hud.hasSave) bump({ confirmNew: true }); else startNew(); }, { tone: hud.hasSave ? "ghost" : "pri", grow: true, test: "new-game" })}
+          <div style={{ display: "flex", gap: 8, flexWrap: "wrap", width: "100%", alignItems: "stretch" }}>
+            {btn("New Game", () => { if (hud.hasSave) bump({ confirmNew: true }); else startNew(); }, { tone: "pri", grow: true, large: true, test: "new-game" })}
+            {hud.hasSave && btn(`Continue (Wave ${Math.max(1, (loadSaved()?.wave ?? 1) | 0)})`, resume, { grow: true, large: true, test: "continue" })}
+          </div>
           {btn("How to Play", () => setHud((h) => ({ ...h, screen: "help", showingHelp: true })), { grow: true, test: "how-to-play" })}
           {btn("Paste save code", () => bump({ saveOpen: true }), { grow: true, test: "paste-save" })}
           {btn("Exit", leaveNow, { tone: "danger", grow: true, test: "exit" })}
@@ -3951,7 +3963,12 @@ export default function CowboyJohnsCropDefense() {
   return (
     <div style={root}>
       <style>{`html,body,#root{height:100%;background:${t.bg.base}} textarea{color:${t.text.primary}}`}</style>
-      {hud.toast && <div data-testid="toast" style={{ position: "fixed", top: 16, left: "50%", transform: "translateX(-50%)", zIndex: 40, background: t.bg.elevated, border: `1px solid ${t.border.focus}`, borderRadius: 12, padding: "8px 14px", fontWeight: 700, boxShadow: "0 8px 24px rgba(0,0,0,0.4)" }}>{hud.toast}</div>}
+      {(hud.startBanner || hud.toast) && (
+        <div style={{ position: "fixed", top: "max(12px, env(safe-area-inset-top))", left: "50%", transform: "translateX(-50%)", zIndex: 45, display: "flex", flexDirection: "column", alignItems: "center", gap: 8, pointerEvents: "none", width: "min(340px, calc(100% - 24px))", boxSizing: "border-box" }}>
+          {hud.startBanner ? <div data-testid="start-banner" style={{ width: "100%", boxSizing: "border-box", textAlign: "center", background: t.fill.primary, color: t.text.onPrimary, border: `2px solid ${t.border.focus}`, borderRadius: 14, padding: "10px 16px", fontFamily: "Georgia, serif", fontSize: 18, fontWeight: 800, letterSpacing: 0.3, boxShadow: "0 8px 24px rgba(0,0,0,0.45)" }}>{hud.startBanner}</div> : null}
+          {hud.toast ? <div data-testid="toast" style={{ background: t.bg.elevated, border: `1px solid ${t.border.focus}`, borderRadius: 12, padding: "8px 14px", fontWeight: 700, boxShadow: "0 8px 24px rgba(0,0,0,0.4)", color: t.text.primary }}>{hud.toast}</div> : null}
+        </div>
+      )}
       {hud.screen === "title" && !hud.showingHelp && titleBody}
       {(hud.screen === "help" || hud.showingHelp) && <div style={{ flex: 1, display: "flex", flexDirection: "column", minHeight: 0, padding: 8 }}>{helpBody}</div>}
       {playHud && !hud.showingHelp && (
