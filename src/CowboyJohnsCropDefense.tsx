@@ -1076,9 +1076,9 @@ function drawFarmBg(c: CanvasRenderingContext2D): void {
   disc(c, 522, 86, 8, "#e8d8c0", 2.4);
   c.beginPath(); rr(c, 514, 86, 16, 22, 3); fillStroke(c, "#d0c0a0", 2);
   // little sign near entrance
-  c.beginPath(); rr(c, 70, 210, 44, 22, 4); fillStroke(c, "#f0dca0", 2);
-  c.fillStyle = INK; c.font = "bold 8px Georgia, serif"; c.textAlign = "center"; c.textBaseline = "middle";
-  c.fillText("SOUTH", 92, 218); c.fillText("FIELD", 92, 227);
+  c.beginPath(); rr(c, 54, 212, 66, 30, 6); fillStroke(c, "#f0dca0", 2.5);
+  c.fillStyle = INK; c.font = "bold 12px Georgia, serif"; c.textAlign = "center"; c.textBaseline = "middle";
+  c.fillText("SOUTH", 87, 222); c.fillText("FIELD", 87, 234);
 }
 
 function drawCropLayer(c: CanvasRenderingContext2D, frame: number): void {
@@ -1533,7 +1533,7 @@ type FarmAct = "idle" | "talk" | "hat" | "sip" | "mean";
 function drawFarmhand(c: CanvasRenderingContext2D, who: "john" | "joe", t: number, act: FarmAct = "idle"): void {
   if (who === "john") { drawJohnWorld(c, t, act); return; }
   const bob = Math.sin(t * 2.4) * 1.6;
-  c.save(); c.translate(0, bob);
+  c.save(); c.translate(0, bob); c.scale(1.5, 1.5);
   shadowBlob(c, 0, 14, 12, 6, 0.28);
   oval(c, 0, 6, 11, 9, "#6a8a3a", 2.4);
   disc(c, 0, -2, 8.5, "#e8b888", 2.2);
@@ -3056,7 +3056,7 @@ function drawFrame(c: CanvasRenderingContext2D, s: Sim, cssW: number, cssH: numb
   if (s.joeHere && (!s.waving || !!s.cut)) {
     c.save(); c.translate(JOE_SPOT.x, JOE_SPOT.y); drawFarmhand(c, "joe", s.time + 1, actFor("joe", s)); c.restore();
   } else if (!s.revealed && !s.won40 && joeAwayFor(s.wave)) {
-    c.fillStyle = "rgba(90,70,40,0.35)"; ellipse(c, JOE_SPOT.x, JOE_SPOT.y + 14, 14, 5); c.fill();
+    c.fillStyle = "rgba(90,70,40,0.35)"; ellipse(c, JOE_SPOT.x, JOE_SPOT.y + 21, 21, 7.5); c.fill();
   }
   for (const tw of s.towers) {
     if (tw.kind !== "uv") continue;
