@@ -319,6 +319,7 @@ function blockedLand(x: number, y: number): boolean {
 }
 
 function canPlaceAt(s: Sim, kind: TowerId, x: number, y: number, ignoreId?: number): boolean {
+  if (x < 0 || y < 0 || x > WW || y > WH) return false;
   const def = TDEF[kind];
   const np = nearPath(x, y);
   if (def.onPath) {
@@ -1027,6 +1028,67 @@ function drawGrassDetails(c: CanvasRenderingContext2D): void {
     c.strokeStyle = "rgba(80,70,40,0.35)"; c.lineWidth = 0.6;
     c.beginPath(); c.arc(x, y - 8, 2.6, 0, Math.PI * 2); c.stroke();
   }
+}
+
+const PAD_TILE = 256;
+
+function drawGrassPad(c: CanvasRenderingContext2D, w: number, h: number): void {
+  c.fillStyle = "#48b53a";
+  c.fillRect(0, 0, w, h);
+  const rng = mulberry(91);
+  const patches = ["#3aa332", "#5ccc48", "#2e8a2a", "#6ad24c", "#459c38", "#7ad85a", "#348028", "#58c044"];
+  const stamp = (x: number, y: number, rad: number, draw: (sx: number, sy: number) => void): void => {
+    for (const ox of [-w, 0, w]) {
+      for (const oy of [-h, 0, h]) {
+        const sx = x + ox, sy = y + oy;
+        if (sx > -rad && sx < w + rad && sy > -rad && sy < h + rad) draw(sx, sy);
+      }
+    }
+  };
+  for (let i = 0; i < 80; i++) {
+    const x = rng() * w, y = rng() * h;
+    const rx = 16 + rng() * 48, ry = 9 + rng() * 26, rot = rng() * 3;
+    const col = patches[i % patches.length];
+    const a = 0.55 + rng() * 0.35;
+    stamp(x, y, rx + ry, (sx, sy) => {
+      c.fillStyle = col; c.globalAlpha = a;
+      c.beginPath(); c.ellipse(sx, sy, rx, ry, rot, 0, Math.PI * 2); c.fill();
+      c.globalAlpha = 1;
+    });
+  }
+  for (let i = 0; i < 1400; i++) {
+    const x = rng() * w, y = rng() * h;
+    c.fillStyle = rng() > 0.5 ? "rgba(20,70,18,0.16)" : "rgba(210,255,160,0.13)";
+    c.fillRect(x, y, 1 + rng() * 2, 1 + rng() * 2);
+  }
+  for (let i = 0; i < 50; i++) {
+    const x = rng() * w, y = rng() * h;
+    const col = i % 3 === 0 ? "#2f8a30" : i % 3 === 1 ? "#5ed24a" : "#3aa336";
+    const hh = 5 + rng() * 8;
+    const lean = (rng() - 0.5) * 4;
+    const n = 2 + (i % 3);
+    stamp(x, y, hh + 6, (sx, sy) => {
+      for (let k = 0; k < n; k++) drawGrassBlade(c, sx + k * 1.6 - 1.6, sy, hh + rng() * 3, col, lean + (k - 1) * 1.1);
+    });
+  }
+}
+
+function fillGrassMargins(c: CanvasRenderingContext2D, cssW: number, cssH: number, scale: number, ox: number, oy: number): void {
+  const pad = SPR.pad;
+  const x0 = Math.floor((-ox / scale) / PAD_TILE) * PAD_TILE;
+  const y0 = Math.floor((-oy / scale) / PAD_TILE) * PAD_TILE;
+  const x1 = (cssW - ox) / scale;
+  const y1 = (cssH - oy) / scale;
+  if (pad) {
+    for (let y = y0; y < y1; y += PAD_TILE) {
+      for (let x = x0; x < x1; x += PAD_TILE) {
+        c.drawImage(pad, x, y, PAD_TILE, PAD_TILE);
+      }
+    }
+    return;
+  }
+  c.fillStyle = "#48b53a";
+  c.fillRect(x0, y0, x1 - x0, y1 - y0);
 }
 
 function drawFarmBg(c: CanvasRenderingContext2D): void {
@@ -2202,7 +2264,7 @@ function drawBetrayalSwarm(c: CanvasRenderingContext2D, t: number): void {
 }
 
 const SPR: {
-  farm?: HTMLCanvasElement; plant: HTMLCanvasElement[]; enemy: Partial<Record<EnemyId, HTMLCanvasElement[]>>;
+  farm?: HTMLCanvasElement; pad?: HTMLCanvasElement; plant: HTMLCanvasElement[]; enemy: Partial<Record<EnemyId, HTMLCanvasElement[]>>;
   scale: number; hd: boolean;
 } = { plant: [], enemy: {}, scale: 0, hd: true };
 let FARM_PRESENT: { img: HTMLCanvasElement; dw: number; dh: number; src: HTMLCanvasElement } | null = null;
@@ -2225,6 +2287,7 @@ function ensureSprites(force = false): void {
   const scale = spriteScale();
   if (!force && SPR.farm && SPR.hd === hd && SPR.scale === scale) return;
   SPR.farm = undefined;
+  SPR.pad = undefined;
   SPR.plant = [];
   SPR.enemy = {};
   SPR.hd = hd;
@@ -2240,6 +2303,16 @@ function ensureSprites(force = false): void {
     drawCropLayer(fc, 1);
   }
   SPR.farm = farm;
+  {
+    const pad = makeC(Math.round(PAD_TILE * scale), Math.round(PAD_TILE * scale));
+    const pc = pad.getContext("2d");
+    if (pc) {
+      prepCtx(pc, true);
+      pc.scale(scale, scale);
+      drawGrassPad(pc, PAD_TILE, PAD_TILE);
+    }
+    SPR.pad = pad;
+  }
   for (let i = 0; i < 5; i++) {
     const p = makeC(Math.round(140 * scale), Math.round(140 * scale));
     const pc = p.getContext("2d");
@@ -2982,11 +3055,13 @@ function drawFrame(c: CanvasRenderingContext2D, s: Sim, cssW: number, cssH: numb
   const oy = (cssH - WH * scale) / 2;
   c.setTransform(1, 0, 0, 1, 0, 0);
   c.clearRect(0, 0, cssW * dpr, cssH * dpr);
-  c.fillStyle = "#1c140c";
+  c.fillStyle = "#48b53a";
   c.fillRect(0, 0, cssW * dpr, cssH * dpr);
   const shx = (s.shake ? (Math.random() - 0.5) * 10 * s.shake : 0);
   const shy = (s.shake ? (Math.random() - 0.5) * 8 * s.shake : 0);
   c.setTransform(dpr * scale, 0, 0, dpr * scale, dpr * (ox + shx), dpr * (oy + shy));
+  c.imageSmoothingEnabled = false;
+  fillGrassMargins(c, cssW, cssH, scale, ox, oy);
   // Prefer a 1:1 present blit of the (possibly 2×) farm so we don't pay a high-quality
   // downscale of a 2000×1600 layer every frame.
   if (SPR.farm) {
@@ -3975,7 +4050,7 @@ export default function CowboyJohnsCropDefense() {
         <div style={{ flex: 1, display: "flex", flexDirection: land ? "row" : "column", minHeight: 0, gap: 8 }}>
           <div style={{ flex: "1 1 auto", display: "flex", flexDirection: "column", minWidth: 0, minHeight: 0 }}>
             {topBar}
-            <div style={{ width: "100%", aspectRatio: `${WW} / ${WH}`, flex: "0 1 auto", minHeight: 140, maxHeight: land ? "100%" : "min(58dvh, calc(100dvw * 0.8))", position: "relative", borderRadius: 14, overflow: "hidden", border: `1px solid ${t.border.default}`, background: "#1c140c" }}>
+            <div style={{ width: "100%", aspectRatio: `${WW} / ${WH}`, flex: "0 1 auto", minHeight: 140, maxHeight: land ? "100%" : "min(58dvh, calc(100dvw * 0.8))", position: "relative", borderRadius: 14, overflow: "hidden", border: `1px solid ${t.border.default}`, background: "#48b53a" }}>
               <canvas
                 ref={canvasRef}
                 data-testid="field"
